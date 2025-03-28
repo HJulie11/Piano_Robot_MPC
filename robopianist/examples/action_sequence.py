@@ -155,74 +155,73 @@ def main(_) -> None:
         ),
     )
 
-    action_spec = env.action_spec()
-    zeros = np.zeros(action_spec.shape, dtype=action_spec.dtype)
-    zeros[-1] = -1.0  # Disable sustain pedal.
-    print(f"Action dimension: {action_spec.shape}")
+    # action_spec = env.action_spec()
+    # zeros = np.zeros(action_spec.shape, dtype=action_spec.dtype)
+    # zeros[-1] = -1.0  # Disable sustain pedal.
+    # print(f"Action dimension: {action_spec.shape}")
 
-    # Sanity check observables.
-    timestep = env.reset()
-    dim = 0
-    for k, v in timestep.observation.items():
-        print(f"\t{k}: {v.shape} {v.dtype}")
-        dim += int(np.prod(v.shape))
-    print(f"Observation dimension: {dim}")
+    # # Sanity check observables.
+    # timestep = env.reset()
+    # dim = 0
+    # for k, v in timestep.observation.items():
+    #     print(f"\t{k}: {v.shape} {v.dtype}")
+    #     dim += int(np.prod(v.shape))
+    # print(f"Observation dimension: {dim}")
 
-    # Manual stepping loop for debugging
-    print("Starting manual simulation loop...")
-    task = env.task
-    actions_list = []
-    for step in range(500):  # Run for 500 steps to cover the MIDI sequence
-        action = np.zeros(env.action_spec().shape)  # Dummy action
-        timestep = env.step(action)
+    # # Manual stepping loop for debugging
+    # print("Starting manual simulation loop...")
+    # task = env.task
+    # actions_list = []
+    # for step in range(500):  # Run for 500 steps to cover the MIDI sequence
+    #     action = np.zeros(env.action_spec().shape)  # Dummy action
+    #     timestep = env.step(action)
 
-        # Extract the action from the task
-        action = task._last_action
-        print(f"Action: {action}")
-        actions_list.append(action.copy())
+    #     # Extract the action from the task
+    #     action = task._last_action
+    #     print(f"Action: {action}")
+    #     actions_list.append(action.copy())
 
-        # Print timestep information
-        print(f"\nStep {step}:")
-        print(f"  Step type: {timestep.step_type}")
-        print(f"  Reward: {timestep.reward}")
-        print(f"  Discount: {timestep.discount}")
-        print(f"  Should terminate: {task.should_terminate_episode(env.physics)}")
-        print(f"  Action: {action}")
+    #     # Print timestep information
+    #     print(f"\nStep {step}:")
+    #     print(f"  Step type: {timestep.step_type}")
+    #     print(f"  Reward: {timestep.reward}")
+    #     print(f"  Discount: {timestep.discount}")
+    #     print(f"  Should terminate: {task.should_terminate_episode(env.physics)}")
+    #     print(f"  Action: {action}")
 
-        # Print piano key activations
-        key_activations = task.piano.activation
-        active_keys = np.flatnonzero(key_activations)
-        print(f"  Active keys: {active_keys}")
+    #     # Print piano key activations
+    #     key_activations = task.piano.activation
+    #     active_keys = np.flatnonzero(key_activations)
+    #     print(f"  Active keys: {active_keys}")
 
-        # Print fingertip distances for assigned fingers
-        for finger in range(5):
-            site_name = task._hand.fingertip_sites[finger].name
-            if task._hand_side == HandSide.LEFT:
-                full_site_name = f"lh_shadow_hand/{site_name}"
-            else:
-                full_site_name = f"rh_shadow_hand/{site_name}"
-            fingertip_pos = env.physics.named.data.site_xpos[full_site_name]
+    #     # Print fingertip distances for assigned fingers
+    #     for finger in range(5):
+    #         site_name = task._hand.fingertip_sites[finger].name
+    #         if task._hand_side == HandSide.LEFT:
+    #             full_site_name = f"lh_shadow_hand/{site_name}"
+    #         else:
+    #             full_site_name = f"rh_shadow_hand/{site_name}"
+    #         fingertip_pos = env.physics.named.data.site_xpos[full_site_name]
 
-            assigned_key = None
-            for key, mjcf_fingering in task._keys_current:
-                if mjcf_fingering == finger:
-                    assigned_key = key
-                    break
+    #         assigned_key = None
+    #         for key, mjcf_fingering in task._keys_current:
+    #             if mjcf_fingering == finger:
+    #                 assigned_key = key
+    #                 break
 
-            if assigned_key is not None:
-                key_site = task.piano.keys[assigned_key].site[0]
-                key_pos = env.physics.bind(key_site).xpos.copy()
-                distance = np.linalg.norm(fingertip_pos - key_pos)
-                print(f"  Finger {finger} distance to key {assigned_key}: {distance:.4f} m")
+    #         if assigned_key is not None:
+    #             key_site = task.piano.keys[assigned_key].site[0]
+    #             key_pos = env.physics.bind(key_site).xpos.copy()
+    #             distance = np.linalg.norm(fingertip_pos - key_pos)
+    #             print(f"  Finger {finger} distance to key {assigned_key}: {distance:.4f} m")
 
-        # Add a small delay to make logs readable
-        time.sleep(0.1)
+    #     # Add a small delay to make logs readable
+    #     time.sleep(0.1)
 
-    # Optionally launch the viewer after manual stepping
+    # # Optionally launch the viewer after manual stepping
 
-    actions_array = np.array(actions_list)
-    np.save("action_sequence.npy", actions_array)
-
+    # actions_array = np.array(actions_list)
+    # np.save("action_sequence.npy", actions_array)
     print("Launching viewer...")
     viewer.launch(env)
 

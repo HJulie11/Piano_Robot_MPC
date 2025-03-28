@@ -1,3 +1,5 @@
+# evaluation.py
+
 import numpy as np
 from pathlib import Path
 import mido
@@ -18,12 +20,26 @@ def create_simple_midi_file(path: Path) -> None:
     track = mido.MidiTrack()
     mid.tracks.append(track)
 
-    notes = [60, 60, 67, 67, 69, 69, 67]  # MIDI note numbers
-    time = 0
-    for note in notes:
-        track.append(mido.Message("note_on", note=note, velocity=64, time=time))
-        track.append(mido.Message("note_off", note=note, velocity=64, time=500))
-        time = 0
+    # Define the notes for "Twinkle, Twinkle, Little Star"
+    notes = [
+        (60, 500),  # C4
+        (60, 500),  # C4
+        (67, 500),  # G4
+        (67, 500),  # G4
+        (69, 500),  # A4
+        (69, 500),  # A4
+        (67, 500),  # G4
+    ]
+
+    # Add note_on and note_off messages with proper timing
+    current_time = 0
+    for pitch, duration in notes:
+        # Note on
+        track.append(mido.Message("note_on", note=pitch, velocity=64, time=current_time))
+        current_time = duration  # Time until note_off
+        # Note off
+        track.append(mido.Message("note_off", note=pitch, velocity=64, time=current_time))
+        current_time = 0  # Reset time for the next note_on
 
     mid.save(str(path))
     print(f"Created MIDI file at {path}")
@@ -43,23 +59,25 @@ def evaluate_action_sequence(env, action_sequence):
     episode_length = 0
 
     # Expected keys and timesteps from the MIDI file
+    # Adjusted for initial_buffer_time = 0.5s, control_timestep = 0.05s
+    # Each note starts 0.5s apart, initial buffer adds 0.5s (10 timesteps)
     expected_keys = {
-        10: 39,  # Pitch 60 (C4) -> key 39
-        20: 39,  # Pitch 60 (C4) -> key 39
-        30: 46,  # Pitch 67 (G4) -> key 46
-        41: 46,  # Pitch 67 (G4) -> key 46
-        51: 48,  # Pitch 69 (A4) -> key 48
-        62: 48,  # Pitch 69 (A4) -> key 48
-        72: 46,  # Pitch 67 (G4) -> key 46
+        10: 39,  # Pitch 60 (C4) -> key 39 at t=0.5s (timestep 10)
+        20: 39,  # Pitch 60 (C4) -> key 39 at t=1.0s (timestep 20)
+        30: 46,  # Pitch 67 (G4) -> key 46 at t=1.5s (timestep 30)
+        40: 46,  # Pitch 67 (G4) -> key 46 at t=2.0s (timestep 40)
+        50: 48,  # Pitch 69 (A4) -> key 48 at t=2.5s (timestep 50)
+        60: 48,  # Pitch 69 (A4) -> key 48 at t=3.0s (timestep 60)
+        70: 46,  # Pitch 67 (G4) -> key 46 at t=3.5s (timestep 70)
     }
     expected_fingers = {
         10: 3,  # Key 39 -> finger 3
         20: 3,  # Key 39 -> finger 3
         30: 3,  # Key 46 -> finger 3
-        41: 3,  # Key 46 -> finger 3
-        51: 4,  # Key 48 -> finger 4
-        62: 4,  # Key 48 -> finger 4
-        72: 3,  # Key 46 -> finger 3
+        40: 3,  # Key 46 -> finger 3
+        50: 4,  # Key 48 -> finger 4
+        60: 4,  # Key 48 -> finger 4
+        70: 3,  # Key 46 -> finger 3
     }
 
     for t, action in enumerate(action_sequence):
@@ -132,11 +150,59 @@ def main():
     test_midi_path = Path("test_twinkle.mid")
     create_simple_midi_file(test_midi_path)
 
-    # Step 2: Load the MIDI file
+    # Step 2: Load and parse the MIDI file manually
     try:
+        # First, attempt to load the MIDI file using MidiFile
         midi = MidiFile(test_midi_path)
         print(f"Loaded MIDI file: {midi}")
-        print(f"MIDI notes: {midi.seq.notes}")
+
+        # Check if the MIDI file was parsed correctly
+        if not hasattr(midi, 'seq') or not hasattr(midi.seq, 'notes'):
+            print("MidiFile did not parse the MIDI file correctly. Parsing manually...")
+            # Manually parse the MIDI file using mido
+            mido_midi = mido.MidiFile(str(test_midi_path))
+            notes = []
+            current_time = 0
+            note_on_times = {}  # To track start times of notes
+
+            # Convert ticks to seconds (assuming default tempo of 500,000 microseconds per beat, 120 BPM)
+            ticks_per_beat = mido_midi.ticks_per_beat
+            seconds_per_tick = 500000 / 1000000 / ticks_per_beat  # 500,000 us/beat = 0.5 s/beat at 120 BPM
+
+            for msg in mido_midi:
+                current_time += msg.time * seconds_per_tick  # Convert delta time to seconds
+                if msg.type == "note_on" and msg.velocity > 0:
+                    note_on_times[msg.note] = current_time
+                elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
+                    if msg.note in note_on_times:
+                        start_time = note_on_times[msg.note]
+                        end_time = current_time
+                        # Create a note object matching the expected structure
+                        note = type('Note', (), {
+                            'start_time': start_time,
+                            'end_time': end_time,
+                            'pitch': msg.note,
+                            'velocity': msg.velocity if msg.type == "note_on" else 0
+                        })()
+                        notes.append(note)
+                        del note_on_times[msg.note]
+
+            # Create a sequence object
+            sequence = type('Sequence', (), {
+                'notes': notes,
+                'events': []  # Add empty events list for sustain pedal (if needed)
+            })()
+
+            # Create a new MidiFile object with the parsed sequence
+            # Since we cannot assign to midi.seq, we create a mock MidiFile object
+            class MockMidiFile:
+                def __init__(self, seq):
+                    self.seq = seq
+
+            midi = MockMidiFile(sequence)
+            print(f"Manually parsed MIDI notes: {midi.seq.notes}")
+        else:
+            print(f"MIDI notes: {midi.seq.notes}")
     except Exception as e:
         print(f"Failed to load MIDI file: {e}")
         return

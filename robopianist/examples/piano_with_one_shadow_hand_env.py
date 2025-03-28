@@ -128,6 +128,20 @@ def create_simple_midi_file(path: Path) -> None:
 
     mid.save(str(path))
 
+    # mid = mido.MidiFile()
+    # track = mido.MidiTrack()
+    # mid.tracks.append(track)
+
+    # # Add notes for "Twinkle, Twinkle, Little Star" (C4, D4, E4)
+    # notes = [60, 61, 62]  # MIDI note numbers
+    # time = 0
+    # for note in notes:
+    #     track.append(mido.Message("note_on", note=note, velocity=64, time=time))
+    #     track.append(mido.Message("note_off", note=note, velocity=64, time=500))  # 500 ticks = 0.5 seconds
+    #     time = 0  # Reset time for the next note_on
+
+    # mid.save(str(path))
+
 def main(_) -> None:
 
     # Create a test MIDI file
