@@ -184,8 +184,8 @@ class ShadowHand(base.Hand):
         self._actuators = tuple(actuators)
 
         # Remove "grasp_site".
-        if self._hand_side == base.HandSide.RIGHT:
-            mjcf_utils.safe_find(self._mjcf_root, "site", "grasp_site").remove()
+        # if self._hand_side == base.HandSide.RIGHT:
+        #     mjcf_utils.safe_find(self._mjcf_root, "site", "grasp_site").remove()
 
     def _add_mjcf_elements(self) -> None:
         # Add sites to the tips of the fingers.
