@@ -1,0 +1,8 @@
+README.md
+setup.py
+BEng_Hons_Diss_TMP.egg-info/PKG-INFO
+BEng_Hons_Diss_TMP.egg-info/SOURCES.txt
+BEng_Hons_Diss_TMP.egg-info/dependency_links.txt
+BEng_Hons_Diss_TMP.egg-info/requires.txt
+BEng_Hons_Diss_TMP.egg-info/top_level.txt
+suite/__init__.py
