@@ -1,0 +1,48 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# Load the timestep rewards
+df_reward = pd.read_csv("results/timestep_rewards.csv")
+df_key_press = pd.read_csv("results/timestep_key_press_rewards.csv")
+df_finger_move = pd.read_csv("results/timestep_finger_movement_rewards.csv")
+df_energy = pd.read_csv("results/timestep_energy_rewards.csv")
+
+plt.figure(figsize=(12, 6))
+plt.plot(df_reward["Timestep"], df_reward["Reward"], label="Reward", color="blue")
+plt.xlabel("Timestep")
+plt.ylabel("Reward")
+plt.title("Reward Over Time")
+plt.legend()
+plt.grid()
+plt.savefig("results/reward_over_time.png", format="png", dpi=300)
+plt.show()
+
+plt.figure(figsize=(12, 6))
+plt.plot(df_key_press["Timestep"], df_key_press["Reward"], label="Reward", color="orange")
+plt.xlabel("Timestep")
+plt.ylabel("Reward")
+plt.title("Key Press Reward Over Time")
+plt.legend()
+plt.grid()
+plt.savefig("results/key_press_over_time.png", format="png", dpi=300)
+plt.show()
+
+plt.figure(figsize=(12, 6))
+plt.plot(df_energy["Timestep"], df_energy["Reward"], label="Reward", color="red")
+plt.xlabel("Timestep")
+plt.ylabel("Reward")
+plt.title("Energy Reward Over Time")
+plt.legend()
+plt.grid()
+plt.savefig("results/energy_over_time.png", format="png", dpi=300)
+plt.show()
+
+plt.figure(figsize=(12, 6))
+plt.plot(df_finger_move["Timestep"], df_finger_move["Reward"], label="Reward", color="green")
+plt.xlabel("Timestep")
+plt.ylabel("Reward")
+plt.title("Finger Movement Reward Over Time")
+plt.legend()
+plt.grid()
+plt.savefig("results/finger_over_time.png", format="png", dpi=300)
+plt.show()

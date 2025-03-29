@@ -25,6 +25,7 @@ from typing import Deque, Dict, List, NamedTuple, Sequence
 
 import dm_env
 import numpy as np
+import pandas as pd
 from dm_env_wrappers import EnvironmentWrapper
 from sklearn.metrics import precision_recall_fscore_support
 
@@ -54,6 +55,10 @@ class MidiEvaluationWrapper(EnvironmentWrapper):
         self._key_presses: List[np.ndarray] = []
         self._sustain_presses: List[np.ndarray] = []
 
+        # Keep track of episode number for plotting
+        self._episode_count = 0
+        self._episode_numbers: Deque[int] = deque(maxlen=deque_size)
+
         # Key press metrics.
         self._key_press_precisions: Deque[float] = deque(maxlen=deque_size)
         self._key_press_recalls: Deque[float] = deque(maxlen=deque_size)
@@ -64,8 +69,29 @@ class MidiEvaluationWrapper(EnvironmentWrapper):
         self._sustain_recalls: Deque[float] = deque(maxlen=deque_size)
         self._sustain_f1s: Deque[float] = deque(maxlen=deque_size)
 
+        # Track timestep and reward for each step
+        self._timestep_rewards: List[tuple[int, float]] = []
+        self._timestep_key_press_rewards: List[tuple[int, float]] = []
+        self._timestep_energy_rewards: List[tuple[int, float]] = []
+        self._timestep_finger_movement_rewards: List[tuple[int, float]] = []
+        self._current_timestep = 0
+
     def step(self, action: np.ndarray) -> dm_env.TimeStep:
         timestep = self._environment.step(action)
+
+        # Log timestep and reward
+        # print(timestep)
+        # return
+        reward = timestep.reward if timestep.reward is not None else 0.0 # Handle None reward
+        key_press_reward = self._environment.task._reward_fn.reward_fns["key_press_reward"](self._environment.physics)
+        energy_reward = self._environment.task._reward_fn.reward_fns["energy_reward"](self._environment.physics)
+        finger_movement_reward = self._environment.task._reward_fn.reward_fns["finger_movement_reward"](self._environment.physics)
+        self._timestep_key_press_rewards.append((self._current_timestep, key_press_reward))
+        self._timestep_energy_rewards.append((self._current_timestep, energy_reward))
+        self._timestep_finger_movement_rewards.append((self._current_timestep, finger_movement_reward))
+
+        self._timestep_rewards.append((self._current_timestep, reward))
+        self._current_timestep += 1
 
         key_activation = self._environment.task.piano.activation
         self._key_presses.append(key_activation.astype(np.float64))
@@ -73,15 +99,18 @@ class MidiEvaluationWrapper(EnvironmentWrapper):
         self._sustain_presses.append(sustain_activation.astype(np.float64))
 
         if timestep.last():
+            self._episode_count += 1
+            self._episode_numbers.append(self._episode_count)
+
             key_press_metrics = self._compute_key_press_metrics()
             self._key_press_precisions.append(key_press_metrics.precision)
             self._key_press_recalls.append(key_press_metrics.recall)
             self._key_press_f1s.append(key_press_metrics.f1)
 
-            sustain_metrics = self._compute_sustain_metrics()
-            self._sustain_precisions.append(sustain_metrics.precision)
-            self._sustain_recalls.append(sustain_metrics.recall)
-            self._sustain_f1s.append(sustain_metrics.f1)
+            # sustain_metrics = self._compute_sustain_metrics()
+            # self._sustain_precisions.append(sustain_metrics.precision)
+            # self._sustain_recalls.append(sustain_metrics.recall)
+            # self._sustain_f1s.append(sustain_metrics.f1)
 
             self._key_presses = []
             self._sustain_presses = []
@@ -90,6 +119,8 @@ class MidiEvaluationWrapper(EnvironmentWrapper):
     def reset(self) -> dm_env.TimeStep:
         self._key_presses = []
         self._sustain_presses = []
+        self._timestep_rewards = []
+        self._current_timestep = 0
         return self._environment.reset()
 
     def get_musical_metrics(self) -> Dict[str, float]:
@@ -108,6 +139,66 @@ class MidiEvaluationWrapper(EnvironmentWrapper):
             "sustain_recall": _mean(self._sustain_recalls),
             "sustain_f1": _mean(self._sustain_f1s),
         }
+    
+    def save_timestep_rewards(self, filename: str) -> None:
+        """Saves the timestep and reward data to a CSV file."""
+        if not self._timestep_rewards:
+            print("No timestep rewards to save.")
+            return
+        
+        data = {
+            "Timestep": [t for t, r in self._timestep_rewards],
+            "Reward": [r for t, r in self._timestep_rewards],
+        }
+
+        df = pd.DataFrame(data)
+        df.to_csv(filename, index=False)
+        print(f"Timestep rewards saved to {filename}.")
+
+    def save_timestep_key_press_rewards(self, filename: str) -> None:
+        """Saves the timestep and key press reward data to a CSV file."""
+        if not self._timestep_key_press_rewards:
+            print("No timestep key press rewards to save.")
+            return
+        
+        data = {
+            "Timestep": [t for t, r in self._timestep_key_press_rewards],
+            "Reward": [r for t, r in self._timestep_key_press_rewards],
+        }
+
+        df = pd.DataFrame(data)
+        df.to_csv(filename, index=False)
+        print(f"Timestep key press rewards saved to {filename}.")
+
+    def save_timestep_energy_rewards(self, filename: str) -> None:
+        """Saves the timestep and energy reward data to a CSV file."""
+        if not self._timestep_energy_rewards:
+            print("No timestep energy rewards to save.")
+            return
+        
+        data = {
+            "Timestep": [t for t, r in self._timestep_energy_rewards],
+            "Reward": [r for t, r in self._timestep_energy_rewards],
+        }
+
+        df = pd.DataFrame(data)
+        df.to_csv(filename, index=False)
+        print(f"Timestep energy rewards saved to {filename}.")
+
+    def save_timestep_finger_movement_rewards(self, filename: str) -> None:
+        """Saves the timestep and finger movement reward data to a CSV file."""
+        if not self._timestep_finger_movement_rewards:
+            print("No timestep finger movement rewards to save.")
+            return
+        
+        data = {
+            "Timestep": [t for t, r in self._timestep_finger_movement_rewards],
+            "Reward": [r for t, r in self._timestep_finger_movement_rewards],
+        }
+
+        df = pd.DataFrame(data)
+        df.to_csv(filename, index=False)
+        print(f"Timestep finger movement rewards saved to {filename}.")
 
     # Helper methods.
 
@@ -118,7 +209,7 @@ class MidiEvaluationWrapper(EnvironmentWrapper):
         ground_truth = []
         for notes in note_seq:
             presses = np.zeros((self._environment.task.piano.n_keys,), dtype=np.float64)
-            keys = [note.key for note in notes]
+            keys = [note.pitch - 21 for note in notes]
             presses[keys] = 1.0
             ground_truth.append(presses)
 

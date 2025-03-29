@@ -17,6 +17,7 @@
 from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
+import matplotlib.pyplot as plt
 from dm_control.composer import variation as base_variation
 from dm_control.composer.observation import observable
 from dm_control.utils.rewards import tolerance
@@ -42,8 +43,8 @@ _ENERGY_PENALTY_COEF = 5e-3
 _NUM_STEPS_PER_SEGMENT = 10
 
 # Control gains for the PD controller
-_KP = 50.0
-_KD = 5.0
+# _KP = 100000
+# _KD = 10
 
 _FINGER_JOINTS = [
     ['rh_THJ5', 'rh_THJ4', 'rh_THJ3', 'rh_THJ2', 'rh_THJ1'],
@@ -73,7 +74,13 @@ _FULL_JOINTS_ONE_ARRAY = _WRIST_JOINTS + [
     'rh_LFJ5', 'rh_LFJ4', 'rh_LFJ3', 'rh_LFJ2', 'rh_LFJ1',
 ] + _FOREARM_JOINTS
 
-
+_FULL_ACTUATOR = [
+    _WRIST_JOINTS + ['rh_THJ5', 'rh_THJ4', 'rh_THJ3', 'rh_THJ2', 'rh_THJ1'] + _FOREARM_JOINTS,
+    _WRIST_JOINTS + ['rh_FFJ4', 'rh_FFJ3', 'rh_FFJ0'] + _FOREARM_JOINTS,
+    _WRIST_JOINTS + ['rh_MFJ4', 'rh_MFJ3', 'rh_MFJ0'] + _FOREARM_JOINTS,
+    _WRIST_JOINTS + ['rh_RFJ4', 'rh_RFJ3', 'rh_RFJ0'] + _FOREARM_JOINTS,
+    _WRIST_JOINTS + ['rh_LFJ5', 'rh_LFJ4', 'rh_LFJ3', 'rh_LFJ0'] + _FOREARM_JOINTS,
+]
 
 class PianoWithOneShadowHand(base.PianoTask):
     def __init__(
@@ -140,6 +147,8 @@ class PianoWithOneShadowHand(base.PianoTask):
             self._full_finger_joints = [[f"lh_shadow_hand/{j}" for j in joints] for joints in _FULL_JOINTS]
             self._full_joints_one_array = [f"lh_shadow_hand/{j}" for j in _FULL_JOINTS_ONE_ARRAY]
             self._wrist_joints = [f"lh_shadow_hand/{j}" for j in _WRIST_JOINTS]
+            self._forearm_joints = [f"lh_shadow_hand/{j}" for j in _FOREARM_JOINTS]
+            self._full_actuator = [[f"lh_shadow_hand/{j}" for j in joints] for joints in _FULL_ACTUATOR]
         else:
             self._hand = self._right_hand
             self._left_hand.detach()
@@ -147,6 +156,8 @@ class PianoWithOneShadowHand(base.PianoTask):
             self._full_finger_joints = [[f"rh_shadow_hand/{j}" for j in joints] for joints in _FULL_JOINTS]
             self._full_joints_one_array = [f"rh_shadow_hand/{j}" for j in _FULL_JOINTS_ONE_ARRAY]
             self._wrist_joints = [f"rh_shadow_hand/{j}" for j in _WRIST_JOINTS]
+            self._forearm_joints = [f"rh_shadow_hand/{j}" for j in _FOREARM_JOINTS]
+            self._full_actuator = [[f"rh_shadow_hand/{j}" for j in joints] for joints in _FULL_ACTUATOR]
         
         if not disable_fingering_reward and not disable_colorization:
             self._colorize_fingertips()
@@ -261,12 +272,13 @@ class PianoWithOneShadowHand(base.PianoTask):
 
         # Set the resting position
         original_qpos = physics.data.qpos.copy()
-        physics.data.qpos[:] = self._resting_qpos
-        mujoco.mj_forward(physics.model.ptr, physics.data.ptr)
+        # physics.data.qpos[:] = self._resting_qpos
+        # mujoco.mj_forward(physics.model.ptr, physics.data.ptr)
 
         # Get the current finger position (start)
-        start_qpos = np.zeros(len(self._finger_joints[finger]))
-        for i, joint_name in enumerate(self._finger_joints[finger]):
+        # start_qpos = np.zeros(len(self._finger_joints[finger]))
+        start_qpos = np.zeros(len(self._full_actuator[finger]))
+        for i, joint_name in enumerate(self._full_actuator[finger]):
             if "J0" in joint_name:
                 joint_idx = physics.model.name2id(joint_name, "tendon")
             else:
@@ -282,12 +294,15 @@ class PianoWithOneShadowHand(base.PianoTask):
 
         # Get target key position in world frame
         key_site = self.piano.keys[key].site[0]
-        key_pos = physics.bind(key_site).xpos.copy()
+        print(f"Key {key} site: {key_site}")
+        # key_pos = physics.bind(key_site).xpos.copy()
+        key_id = physics.model.name2id(f"piano/{key_site.name}", "site")
+        key_pos = physics.data.site_xpos[key_id].copy()
         print(f"Key {key} position: {key_pos}")
 
         # Adjust key position for presing
         press_pos = key_pos.copy()
-        press_pos[2] += 0.005
+        press_pos[2] -= 0.005
         print(f"Adjusted press position (just above key): {press_pos}")
 
         # Convert press_pos to the fingertip's local frame
@@ -307,7 +322,8 @@ class PianoWithOneShadowHand(base.PianoTask):
             full_site_name,
             local_press_pos,
             None,
-            self._full_finger_joints[finger], # excluding wrist for now: + self._wrist_joints,
+            self._full_finger_joints[finger], # including wrist, finger joints, and hand x-y position
+            # self._full_actuator[finger],
             tol=1e-2,
             max_steps=200,
             regularization_threshold = 0.01,
@@ -335,8 +351,8 @@ class PianoWithOneShadowHand(base.PianoTask):
         else:
             print(f"Finger {finger}: IK succeeed, err_norm={ik_result.err_norm}")
 
-            goal_qpos = np.zeros(len(self._finger_joints[finger]))
-            for i, joint_name in enumerate(self._finger_joints[finger]):
+            goal_qpos = np.zeros(len(self._full_actuator[finger]))
+            for i, joint_name in enumerate(self._full_actuator[finger]):
                 if "J0" in joint_name:
                     joint_idx = physics.model.name2id(joint_name, "tendon")
                 else:
@@ -346,8 +362,8 @@ class PianoWithOneShadowHand(base.PianoTask):
         print(f"Finger {finger} goal qpos: {goal_qpos}")
 
         # Joint limits
-        joint_limits = np.zeros((len(self._finger_joints[finger]), 2))
-        for i, joint_name in enumerate(self._finger_joints[finger]):
+        joint_limits = np.zeros((len(self._full_actuator[finger]), 2))
+        for i, joint_name in enumerate(self._full_actuator[finger]):
             if "J0" in joint_name:
                 joint_idx = physics.model.name2id(joint_name, "tendon")
             else:
@@ -471,8 +487,8 @@ class PianoWithOneShadowHand(base.PianoTask):
                 print(f"Finger {finger}: IK failed for intermediate position, err_norm={ik_result.err_norm}")
                 break
 
-            current_qpos = np.zeros(len(self._finger_joints[finger]))
-            for i, joint_name in enumerate(self._finger_joints[finger]):
+            current_qpos = np.zeros(len(self._full_actuator[finger]))
+            for i, joint_name in enumerate(self._full_actuator[finger]):
                 if "J0" in joint_name:
                     joint_idx = physics.model.name2id(joint_name, "tendon")
                 else:
@@ -480,7 +496,7 @@ class PianoWithOneShadowHand(base.PianoTask):
                 current_qpos[i] = physics.data.qpos[joint_idx]
 
             original_qpos = physics.data.qpos.copy()
-            for i, joint_name in enumerate(self._finger_joints[finger]):
+            for i, joint_name in enumerate(self._full_actuator[finger]):
                 if "J0" in joint_name:
                     joint_idx = physics.model.name2id(joint_name, "tendon")
                 else:
@@ -498,7 +514,7 @@ class PianoWithOneShadowHand(base.PianoTask):
     
     def _check_collision(self, physics, finger, qpos) -> bool:
         original_qpos = physics.data.qpos.copy()
-        for i, joint_name in enumerate(self._finger_joints[finger]):
+        for i, joint_name in enumerate(self._full_actuator[finger]):
             if "J0" in joint_name:
                 joint_idx = physics.model.name2id(joint_name, "tendon")
             else:
@@ -554,73 +570,88 @@ class PianoWithOneShadowHand(base.PianoTask):
 
         return M, C, G
     
-    def _compute_pd_control_with_grav_comp(
-            self,
-            physics,
-            joint_inds: List[int],
-            target_qpos: np.ndarray,
-            current_qpos: np.ndarray,
-            current_qvel: np.ndarray,
-            grav_frcs: np.ndarray,
-    )-> np.ndarray:
-        """
-        Compute control torques using a PD controller with gravity compensation.
+    # def _compute_pd_control_with_grav_comp(
+    #         self,
+    #         physics,
+    #         joint_inds: List[int],
+    #         target_qpos: np.ndarray,
+    #         current_qpos: np.ndarray,
+    #         current_qvel: np.ndarray,
+    #         grav_frcs: np.ndarray,
+    # )-> np.ndarray:
+    #     """
+    #     Compute control torques using a PD controller with gravity compensation.
 
-        Args:
-            physics: The MuJoCo physics instance.
-            joint_inds: A list of joint indices to compute the control torques for.
-            target_qpos: The target joint positions.
-            current_qpos: The current joint positions.
-            current_qvel: The current joint velocities.
-            grav_frcs: The gravity forces for the specified joints.
+    #     Args:
+    #         physics: The MuJoCo physics instance.
+    #         joint_inds: A list of joint indices to compute the control torques for.
+    #         target_qpos: The target joint positions.
+    #         current_qpos: The current joint positions.
+    #         current_qvel: The current joint velocities.
+    #         grav_frcs: The gravity forces for the specified joints.
 
-        Returns:
-            control_torques: The computed control torques.
-        """
-        # position error
-        pos_err = target_qpos - current_qpos
-        # velocity error
-        vel_err = -current_qvel # Desired velocity is zero as we want to reach the position
+    #     Returns:
+    #         control_torques: The computed control torques.
+    #     """
+    #     # position error
+    #     pos_err = target_qpos - current_qpos
+    #     # velocity error
+    #     vel_err = -current_qvel # Desired velocity is zero as we want to reach the position
 
-        # PD control
-        control_torques = _KP * pos_err + _KD * vel_err + grav_frcs
+    #     print(f"shapes: {pos_err.shape}, {vel_err.shape}, {grav_frcs.shape}")
 
-        # Clip the control torques
-        actuator_inds = []
-        for joint_idx in joint_inds:
-            actuator_idx = -1
-            for i, act in enumerate(self._hand.actuators):
-                # if hasattr(act, "joint") and act.joint is not None:
-                #     joint_id = physics.model.name2id(act.joint.name, "joint")
-                #     if joint_id == joint_idx:
-                #         actuator_idx = i
-                #         break
-                # elif hasattr(act, "tendon") and act.tendon is not None:
-                #     joint_id = physics.model.name2id(act.tendon.name, "tendon")
-                #     if act.tendon.jntid == joint_idx:
-                #         actuator_idx = i
-                #         break
+    #     # PD control
+    #     control_torques = _KP * pos_err + _KD * vel_err + grav_frcs
 
-                if act.joint:
+    #     # Clip the control torques
+    #     actuator_inds = []
+    #     for joint_idx in joint_inds:
+    #         actuator_idx = -1
+    #         for i, act in enumerate(self._hand.actuators):
+    #             # if hasattr(act, "joint") and act.joint is not None:
+    #             #     joint_id = physics.model.name2id(act.joint.name, "joint")
+    #             #     if joint_id == joint_idx:
+    #             #         actuator_idx = i
+    #             #         break
+    #             # elif hasattr(act, "tendon") and act.tendon is not None:
+    #             #     joint_id = physics.model.name2id(act.tendon.name, "tendon")
+    #             #     if act.tendon.jntid == joint_idx:
+    #             #         actuator_idx = i
+    #             #         break
+
+    #             if act.joint:
             
-                    joint_id = physics.model.name2id(f"rh_shadow_hand/{act.joint.name}", "joint")
-                    if joint_id == joint_idx:
-                        actuator_idx = i
-                        break
-                elif act.tendon:
-                    joint_id = physics.model.name2id(f"rh_shadow_hand/{act.tendon.name}", "tendon")
-                    if joint_id == joint_idx:
-                        actuator_idx = i
-                        break
+    #                 joint_id = physics.model.name2id(f"rh_shadow_hand/{act.joint.name}", "joint")
+    #                 if joint_id == joint_idx:
+    #                     actuator_idx = i
+    #                     break
+    #             elif act.tendon:
+    #                 joint_id = physics.model.name2id(f"rh_shadow_hand/{act.tendon.name}", "tendon")
+    #                 if joint_id == joint_idx:
+    #                     actuator_idx = i
+    #                     break
 
-            if actuator_idx != -1:
-                actuator_inds.append(actuator_idx)
+    #         # if actuator_idx != -1:
+    #         #     actuator_inds.append(actuator_idx)
+
+    #         if actuator_idx == -1:
+    #             raise ValueError(f"Actuator not found for joint index {joint_idx}")
+    #         actuator_inds.append(actuator_idx)
         
-        if actuator_inds:
-            ctrl_range = physics.model.actuator_ctrlrange[actuator_inds]
-            control_torques = np.clip(control_torques, ctrl_range[:, 0], ctrl_range[:, 1])
+    #     print(actuator_inds)
+    #     # if actuator_inds:
+    #     #     ctrl_range = physics.model.actuator_ctrlrange[actuator_inds]
+    #     #     print(f"Control range: {ctrl_range}")
+    #     #     print(ctrl_range.shape)
+    #     #     print(control_torques.shape)
+    #     #     control_torques = np.clip(control_torques, ctrl_range[:, 0], ctrl_range[:, 1])
+    #     ctrl_range = physics.model.actuator_ctrlrange[actuator_inds]
+    #     print(f"Control range: {ctrl_range}")
+    #     print(ctrl_range.shape)
+    #     print(control_torques.shape)
+    #     control_torques = np.clip(control_torques, ctrl_range[:, 0], ctrl_range[:, 1])
         
-        return control_torques
+    #     return control_torques
             
     
     def _update_hand_position(self, physics):
@@ -664,22 +695,22 @@ class PianoWithOneShadowHand(base.PianoTask):
                 print(f"Finger {finger} (fingertip {full_site_name}) is assigned to key {assigned_key}")
                 print(f"Finger {finger}: Fingertip pos: {fingertip_pos}, Key pos: {key_pos}")
                 print(f"Finger {finger}: Distance to key {assigned_key}: {distance:.4f} m, Key state: {key_state:.4f}, Key activation: {key_activation}")
-            else:
-                print(f"Finger {finger} (fingertip {full_site_name}) is not assigned to any key")
+            # else:
+                # print(f"Finger {finger} (fingertip {full_site_name}) is not assigned to any key")
 
         # Execute trajectories
         action = np.zeros(len(self._hand.actuators) + 1) # +1 for the sustain pedal
-        print(f"Total actuators: {len(self._hand.actuators)}")
+        # print(f"Total actuators: {len(self._hand.actuators)}")
         
         # Compute current joint velocities (derivative of qpos)
-        current_qvel = np.zeros(len(self._hand.actuators))
-        for i, joint_name in enumerate(self._full_joints_one_array):
-            if "J0" in joint_name:
-                joint_idx = physics.model.name2id(joint_name, "tendon")
-            else:
-                joint_idx = physics.model.name2id(joint_name, "joint")
-            if joint_idx == -1:
-                current_qvel[i] = physics.data.qvel[joint_idx]
+        # current_qvel = np.zeros(len(self._hand.actuators))
+        # for i, joint_name in enumerate(self._full_joints_one_array):
+        #     if "J0" in joint_name:
+        #         joint_idx = physics.model.name2id(joint_name, "tendon")
+        #     else:
+        #         joint_idx = physics.model.name2id(joint_name, "joint")
+        #     if joint_idx == -1:
+        #         current_qvel[i] = physics.data.qvel[joint_idx]
 
         # Execute trajectories for each finger
         for finger in range(5):
@@ -688,51 +719,52 @@ class PianoWithOneShadowHand(base.PianoTask):
                 if step < len(self._trajectories[finger]):
                     qpos_finger = self._trajectories[finger][step]
                     print(f"Finger {finger}, Step {step}: qpos_finger: {qpos_finger}")
-                    if len(qpos_finger) != len(self._finger_joints[finger]):
+                    if len(qpos_finger) != len(self._full_actuator[finger]):
                         raise ValueError(f"Invalid qpos length for finger {finger}: {len(qpos_finger)}")
                     
                     # Compute dynamics for the finger ------------------------------------------------
                     # Get joint indices
-                    joint_inds = []
-                    for joint_name in self._finger_joints[finger]:
-                        if "J0" in joint_name:
-                            joint_idx = physics.model.name2id(joint_name, "tendon")
-                        else:
-                            joint_idx = physics.model.name2id(joint_name, "joint")
-                        joint_inds.append(joint_idx)
+                    # joint_inds = []
+                    # for joint_name in self._full_actuator[finger]:
+                    #     if "J0" in joint_name:
+                    #         joint_idx = physics.model.name2id(joint_name, "tendon")
+                    #     else:
+                    #         joint_idx = physics.model.name2id(joint_name, "joint")
+                    #     joint_inds.append(joint_idx)
 
-                    # Current joint positions and velocities
-                    current_qpos = np.zeros(len(joint_inds))
-                    current_qvel_finger = np.zeros(len(joint_inds))
-                    for i, joint_idx in enumerate(joint_inds):
-                        current_qpos[i] = physics.data.qpos[joint_idx]
-                        current_qvel_finger[i] = physics.data.qvel[joint_idx]
+                    # # Current joint positions and velocities
+                    # current_qpos = np.zeros(len(joint_inds))
+                    # current_qvel_finger = np.zeros(len(joint_inds))
+                    # for i, joint_idx in enumerate(joint_inds):
+                    #     current_qpos[i] = physics.data.qpos[joint_idx]
+                    #     current_qvel_finger[i] = physics.data.qvel[joint_idx]
 
                     # Compute dynamics (for this finger)
-                    M, C, G = self._compute_dynamics(physics, joint_inds)
-                    print(f"Finger {finger}, Step {step}: M: {M}, C: {C}, G: {G}")
+                    # M, C, G = self._compute_dynamics(physics, joint_inds)
+                    # print(f"Finger {finger}, Step {step}: M: {M}, C: {C}, G: {G}")
 
-                    # PD control with gravity compensation -----------------------------------------
-                    control_torques = self._compute_pd_control_with_grav_comp(
-                        physics,
-                        joint_inds,
-                        qpos_finger,
-                        current_qpos,
-                        current_qvel_finger,
-                        G
-                    )
-                    print(f"Finger {finger}, Step {step}: Control torques: {control_torques}")
+                    # print(f"hand pos shapes: {qpos_finger.shape}, {current_qpos.shape}, {current_qvel_finger.shape}, {G.shape}")
+                    # # PD control with gravity compensation -----------------------------------------
+                    # control_torques = self._compute_pd_control_with_grav_comp(
+                    #     physics,
+                    #     joint_inds,
+                    #     qpos_finger,
+                    #     current_qpos,
+                    #     current_qvel_finger,
+                    #     G
+                    # )
+                    # print(f"Finger {finger}, Step {step}: Control torques: {control_torques}")
                     # ---------------------------------------------------------------------------
 
                     # Map torques to action array
-                    for i, joint_name in enumerate(self._finger_joints[finger]):
+                    for i, joint_name in enumerate(self._full_actuator[finger]):
                         if "J0" in joint_name:
                             joint_idx = physics.model.name2id(joint_name, "tendon")
                         else:
                             joint_idx = physics.model.name2id(joint_name, "joint")
                         current_qpos = physics.data.qpos[joint_idx]
                         error = qpos_finger[i] - current_qpos
-                        print(f"Joint name: {joint_name}")
+                        # print(f"Joint name: {joint_name}")
                         try:
                             if "J0" in joint_name:
                                 action_idx = next(
@@ -745,12 +777,12 @@ class PianoWithOneShadowHand(base.PianoTask):
                                     if (hasattr(act, "joint") and act.joint is not None and act.joint.name in joint_name)
                                 )
                             actuator = self._hand.actuators[action_idx]
-                            print(f"Matched actuator for joint {joint_name}: {actuator.name}")
+                            # print(f"Matched actuator for joint {joint_name}: {actuator.name}")
                         except StopIteration:
                             print(f"No actuator found for joint {joint_name}")
                             raise
-                        action[action_idx] = 50.0 * error
-                        print(f"Finger {finger}, Joint {joint_name}, Position error: {error: 4f}, Action: {action[action_idx]: 4f}")
+                        action[action_idx] = 200.0 * error
+                        # print(f"Finger {finger}, Joint {joint_name}, Position error: {error: 4f}, Action: {action[action_idx]: 4f}")
 
                         # try:
                         #     if "J0" in joint_name:
@@ -763,6 +795,7 @@ class PianoWithOneShadowHand(base.PianoTask):
                         #             i for i, act in enumerate(self._hand.actuators)
                         #             if (hasattr(act, "joint") and act.joint is not None and act.joint.name in joint_name)
                         #         )
+                        #     actuator = self._hand.actuators[action_idx]
                         #     action[action_idx] = control_torques[i]
                         #     print(f"Finger {finger}, Joint {joint_name}, Control torque: {control_torques[i]: 4f}, Action: {action[action_idx]: 4f}")
                         # except StopIteration:
@@ -799,8 +832,8 @@ class PianoWithOneShadowHand(base.PianoTask):
 
         self._hand.apply_action(physics, action[:-1], random_state=None)
         self._last_action = action
-        self._last_qvel = current_qvel.copy()
-        print(f"Hand position update took {time.time() - start_time:.2f} seconds")
+        # self._last_qvel = current_qvel.copy()
+        # print(f"Hand position update took {time.time() - start_time:.2f} seconds")
         return action
     
     def _set_resting_position(self, physics) -> np.ndarray:
@@ -833,28 +866,31 @@ class PianoWithOneShadowHand(base.PianoTask):
         # print(f"Hand center position before IK: {hand_center_pos}")
 
         # Use IK to position the hand center above key 38
-        # target_pos = key_pos.copy()
-        # target_pos[2] = hand_center_pos[2] + 1.0
-        # ik_result = qpos_from_site_pose(
-        #     physics,
-        #     full_site_name,
-        #     target_pos,
-        #     None,
-        #     self._wrist_joints,
-        #     tol=1e-2,
-        #     max_steps=200,
-        #     regularization_threshold = 0.01,
-        #     regularization_strength = 0.1,
-        # )
-        # print(f"IK result: {ik_result}")
-        # if ik_result.success:
-        #     for joint_name in self._wrist_joints:
-        #         joint_idx = physics.model.name2id(joint_name, "joint")
-        #         resting_qpos[joint_idx] = physics.data.qpos[joint_idx]
-        #     hand_center_pos_after = physics.named.data.site_xpos[full_site_name].copy()
-        #     print(f"Hand center position after IK: {hand_center_pos_after}")
-        # else:
-        #     print("IK failed to position the hand center above key 38")
+        target_pos = key_pos.copy()
+        target_pos[2] += 1.0
+        ik_result = qpos_from_site_pose(
+            physics,
+            full_site_name,
+            target_pos,
+            None,
+            self._wrist_joints + self._forearm_joints,
+            # self._full_joints_one_array,
+            tol=1e-2,
+            max_steps=200,
+            regularization_threshold = 0.01,
+            regularization_strength = 0.1,
+            max_update_norm = 1.0,
+            progress_thresh = 50.0,
+        )
+        print(f"IK result: {ik_result}")
+        if ik_result.success:
+            for joint_name in self._wrist_joints + self._forearm_joints:
+                joint_idx = physics.model.name2id(joint_name, "joint")
+                resting_qpos[joint_idx] = physics.data.qpos[joint_idx]
+            hand_center_pos_after = physics.named.data.site_xpos[full_site_name].copy()
+            print(f"Hand center position after IK: {hand_center_pos_after}")
+        else:
+            print("IK failed to position the hand center above key 38")
 
         # Apply the resting position
         physics.data.qpos[:] = resting_qpos
@@ -866,28 +902,99 @@ class PianoWithOneShadowHand(base.PianoTask):
     def initialize_episode(self, physics, random_state) -> None:
         # del physics  # Unused.
         # self._maybe_change_midi(random_state)
+        self._resting_qpos = self._set_resting_position(physics)
         self._reset_quantities_at_episode_init()
         self._maybe_change_midi(random_state)
-        self._resting_qpos = self._set_resting_position(physics)
 
     def _assign_fingers(self, notes):
-        # Simple heuristic for finger assignment based on key position
+        # # Simple heuristic for finger assignment based on key position
+        # finger_assignments = []
+        # for note in notes:
+        #     key = note.pitch - 21
+        #     # Assign fingers based on key ranges
+        #     if key < 48:
+        #         finger = 0
+        #     elif key < 60:
+        #         finger = 1
+        #     elif key < 72:
+        #         finger = 2
+        #     elif key < 84:
+        #         finger = 3
+        #     else:
+        #         finger = 4
+        #     finger_assignments.append((key, finger))
+        # return finger_assignments
+
+        """
+        Assign fingers (thumb, index, middle) to notes based on the rules below:
+        1. If notes are <= 2 keys apart, assign thumb (0), index (1), middle (2) in order.
+        2. If notes are > 2 keys apart, use the middle finger (2) for the next note.
+        3. Allow thumb to go underneath index or middle finger 
+           if the next key is right next to the key pressed by the middle finger, 
+           then arrange fingers naturally.
+
+        Args:
+            notes: A list of notes to assign fingers to.
+
+        Returns:
+            A list of finger assignments for each note. (key, finger)
+        """
+
+        if not notes:
+            return []
+        
+        # Convert notes to key indices (MIDI pitch - 21 to map to piano keys 1-88)
+        keys = [note.pitch - 21 for note in notes]
+        keys.sort() # Sort keys in ascending order to process them from left to right.
+
         finger_assignments = []
-        for note in notes:
-            key = note.pitch - 21
-            # Assign fingers based on key ranges
-            if key < 48:
-                finger = 0
-            elif key < 60:
-                finger = 1
-            elif key < 72:
-                finger = 2
-            elif key < 84:
-                finger = 3
+        last_finger = None
+        last_key = None
+
+        for i, key in enumerate(keys):
+            # First note: Start with the thumb.
+            if i == 0:
+                finger = 0 # Thumb
+                finger_assignments.append((key, finger))
+                last_finger = finger
+                last_key = key
+                continue
+            
+            # Compute the distance between the current key and the last key.
+            key_distance = key - last_key
+
+            # Rule 2: Check if thumb should go underneeath
+            if last_finger == 2 and key_distance == 1:
+                finger = 0 # Thumb
+                finger_assignments.append((key, finger))
+                last_finger = finger
+                last_key = key
+                continue
+                
+            # Rule 1: If the distance is less than or equal to 2, assign the next finger.
+            if key_distance <= 3:
+                if last_finger == 0:
+                    finger = 1
+                elif last_finger == 1:
+                    finger = 2
+                else:
+                    finger = 0
             else:
-                finger = 4
+                finger = 2
+            
             finger_assignments.append((key, finger))
-        return finger_assignments
+            last_finger = finger
+            last_key = key
+        
+        # Adjust for hand side (if left hand, fingers are shifted).
+        adjusted_assignments = []
+        for key, finger in finger_assignments:
+            if self._hand_side == HandSide.RIGHT:
+                adjusted_assignments.append((key, finger))
+            else:
+                adjusted_assignments.append((88 - key, 4 - finger))
+        
+        return adjusted_assignments
 
     def after_step(self, physics, random_state) -> None:
         # del random_state  # Unused.
@@ -912,13 +1019,12 @@ class PianoWithOneShadowHand(base.PianoTask):
         self._update_goal_state()
         self._goal_current = self._goal_state[0]
         print(f"Goal state: {self._goal_current}")
-        print(f"Non-zero indices in goal state: {np.flatnonzero(self._goal_current)}")
+        # print(f"Non-zero indices in goal state: {np.flatnonzero(self._goal_current)}")
 
         should_not_be_pressed = np.flatnonzero(1 - self._goal_current[:-1])
         self._failure_termination = self.piano.activation[should_not_be_pressed].any()
 
         action = self._update_hand_position(physics)
-        print(f"action shape: {action.shape}")
 
         self._hand.apply_action(physics, action[:-1], random_state)
         self._last_action = action
@@ -985,20 +1091,70 @@ class PianoWithOneShadowHand(base.PianoTask):
         mujoco.mj_forward(physics.model.ptr, physics.data.ptr)
 
         trajectory = []
+        timesteps = list(range(len(self._notes)))
+        fingertip_positions = {finger: [] for finger in range(5)}
+        joint_position = {finger: {joint: [] for joint in self._full_actuator[finger]} for finger in range(5)}
+        distances = {finger: [] for finger in range(5)}
+        keys_current_history = []
+
         for t in range(len(self._notes)):
             print(f"Processing timestep {t}...")
             self._t_idx = t
             self._update_fingering_state()
             self._keys_current = self._keys
+            keys_current_history.append(self._keys_current)
+
+            for finger in range(5):
+                site_name = self._hand.fingertip_sites[finger].name
+                if self._hand_side == HandSide.LEFT:
+                    full_site_name = f"lh_shadow_hand/{site_name}"
+                else:
+                    full_site_name = f"rh_shadow_hand/{site_name}"
+                fingertip_pos = physics.named.data.site_xpos[full_site_name]
+                fingertip_positions[finger].append(fingertip_pos)
+
+                target_key = None
+                for key, mjcf_fingering in self._keys_current:
+                    if mjcf_fingering == finger:
+                        target_key = key
+                        break
+                if target_key is not None:
+                    key_site = self.piano.keys[target_key].site[0]
+                    key_pos = physics.bind(key_site).xpos.copy()
+                    distance = np.linalg.norm(fingertip_pos - key_pos)
+                    distances[finger].append(distance)
+                else:
+                    distances[finger].append(np.nan)
+                
+                for joint_name in self._full_actuator[finger]:
+                    if "J0" in joint_name:
+                        joint_idx = physics.model.name2id(joint_name, "tendon")
+                    else:
+                        joint_idx = physics.model.name2id(joint_name, "joint")
+                    joint_pos = physics.data.qpos[joint_idx]
+                    joint_position[finger][joint_name].append(joint_pos)
+
             action = self._update_hand_position(physics)
             print(f"Action at timestep {t}: {action}")
             trajectory.append(action)
+
         print(f"Trajectory length: {len(trajectory)}")
-        return trajectory
+        simulation_data = {
+            "trajectory": trajectory,
+            "timesteps": timesteps,
+            "fingertip_positions": fingertip_positions,
+            "joint_positions": joint_position,
+            "distances": distances,
+            "keys_current_history": keys_current_history,
+            "hand_side": self._hand_side,
+            "full_actuator": self._full_actuator,
+        }
+        # return trajectory
+        return simulation_data
 
     def before_step(self, physics, action, random_state) -> None:
         sustain = action[-1]
-        self.piano.apply_sustain(physics, sustain, random_state)
+        self.piano.apply_sustain(physics, sustain, random_state) 
         self._hand.apply_action(physics, action, random_state) #action[:-1] when generating action npy
         # pass
 
@@ -1089,7 +1245,7 @@ class PianoWithOneShadowHand(base.PianoTask):
         t_start = self._t_idx
         t_end = min(t_start + self._n_steps_lookahead + 1, len(self._notes))
         for i, t in enumerate(range(t_start, t_end)):
-            keys = [note.pitch - 21 for note in self._notes[t]]
+            keys = [(note.pitch - 21) for note in self._notes[t]]
             self._goal_state[i, keys] = 1.0
             # self._goal_state[i, -1] = self._sustains[t]
 
@@ -1120,7 +1276,7 @@ class PianoWithOneShadowHand(base.PianoTask):
             if self._hand_side == HandSide.RIGHT:
                 self._keys.append((key, finger))
             else:
-                self._keys.append((key, finger - 5))
+                self._keys.append((key, finger)) # -5
 
         # Update fingering state
         self._fingering_state = np.zeros((5,), dtype=np.float64)
