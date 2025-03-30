@@ -148,6 +148,8 @@ class PianoWithOneShadowHand(base.PianoTask):
             self._colorize_fingertips()
         self._reset_quantities_at_episode_init()
         self._reset_trajectory(self._midi)  # Important: call before adding observables.
+        self._last_finger = None
+        self._last_key = None
         self._add_observables()
         self._set_rewards()
 
@@ -182,7 +184,7 @@ class PianoWithOneShadowHand(base.PianoTask):
         self._should_terminate: bool = False
         self._discount: float = 1.0
 
-        # self._notes = []
+        self._notes = []
         self._keys = []
         self._keys_current = []
         self._fingering_state = np.zeros((5,), dtype=np.float64)
@@ -192,6 +194,9 @@ class PianoWithOneShadowHand(base.PianoTask):
         self._last_planned_keys = [None] * 5
         self._last_action = None
         self._sustain_state = 0.0 # skip for now
+
+        self._last_finger = None
+        self._last_key = None
 
     def _maybe_change_midi(self, random_state) -> None:
         if self._augmentations is not None:
@@ -800,22 +805,139 @@ class PianoWithOneShadowHand(base.PianoTask):
 
     def _assign_fingers(self, notes):
         # Simple heuristic for finger assignment based on key position
+        # finger_assignments = []
+        # for note in notes:
+        #     key = note.pitch - 21
+        #     # Assign fingers based on key ranges
+        #     if key < 48:
+        #         finger = 0
+        #     elif key < 60:
+        #         finger = 1
+        #     elif key < 72:
+        #         finger = 2
+        #     elif key < 84:
+        #         finger = 3
+        #     else:
+        #         finger = 4
+        #     finger_assignments.append((key, finger))
+        # return finger_assignments
+        """
+        Assign fingers (thumb, index, middle) to notes based on the rules below:
+        1. If notes are <= 2 keys apart, assign thumb (0), index (1), middle (2) in order.
+        2. If notes are > 2 keys apart, use the middle finger (2) for the next note.
+        3. Allow thumb to go underneath index or middle finger 
+           if the next key is right next to the key pressed by the middle finger, 
+           then arrange fingers naturally.
+
+        Args:
+            notes: A list of notes to assign fingers to.
+
+        Returns:
+            A list of finger assignments for each note. (key, finger)
+        """
+
+        if not notes:
+            return []
+        
+
+        
+        keys = [note.pitch - 21 for note in notes]
+        keys.sort()
+        print(f"Timestep {self._t_idx}: Keys to press: {keys}")
+
         finger_assignments = []
-        for note in notes:
-            key = note.pitch - 21
-            # Assign fingers based on key ranges
-            if key < 48:
+        # last_finger = None
+        # last_key = None
+
+        # for i, key in enumerate(keys):
+        #     # First note: Start with the thumb.
+        #     if i == 0:
+        #         finger = 0 # Thumb
+        #         finger_assignments.append((key, finger))
+        #         last_finger = finger
+        #         last_key = key
+        #         continue
+            
+        #     # Compute the distance between the current key and the last key.
+        #     key_distance = key - last_key
+
+        #     # Rule 2: Check if thumb should go underneeath
+        #     if last_finger == 2 and key_distance == 1:
+        #         finger = 0 # Thumb
+        #         finger_assignments.append((key, finger))
+        #         last_finger = finger
+        #         last_key = key
+        #         continue
+                
+        #     # Rule 1: If the distance is less than or equal to 2, assign the next finger.
+        #     if key_distance <= 3:
+        #         if last_finger == 0:
+        #             finger = 1
+        #         elif last_finger == 1:
+        #             finger = 2
+        #         else:
+        #             finger = 0
+        #     else:
+        #         finger = 2
+            
+        #     finger_assignments.append((key, finger))
+        #     last_finger = finger
+        #     last_key = key
+
+        # print(f"Finger assignments: {finger_assignments}")
+        
+        # # Adjust for hand side (if left hand, fingers are shifted).
+        # adjusted_assignments = []
+        # for key, finger in finger_assignments:
+        #     if self._hand_side == HandSide.RIGHT:
+        #         adjusted_assignments.append((key, finger))
+        #     else:
+        #         adjusted_assignments.append((88 - key, 4 - finger))
+        
+        # return adjusted_assignments
+
+
+        # Handle chords (multiple notes at the same timestep)
+        if len(keys) > 1:
+            # Assign fingers in order for chords
+            for i, key in enumerate(keys):
+                finger = i % 3 # Cycle through thumb, index, middle
+                finger_assignments.append((key, finger))
+            # update last_finger and last_key with the highest key and finger
+            self._last_finger = finger_assignments[-1][1]
+            self._last_key = finger_assignments[-1][0]
+        else:
+            # Single note case (sequential)
+            key = keys[0]
+            if self._last_key is None:
                 finger = 0
-            elif key < 60:
-                finger = 1
-            elif key < 72:
-                finger = 2
-            elif key < 84:
-                finger = 3
             else:
-                finger = 4
+                key_distance = key - self._last_key
+                # Rule 3: Thumb under ring if adjacent
+                if self._last_finger == 2 and key_distance == 1:
+                    finger = 0
+                elif abs(key_distance) <= 3:
+                    if self._last_finger == 0:
+                        finger = 1 # Index
+                    elif self._last_finger == 1:
+                        finger = 2
+                    else:
+                        finger = 0
+                else:
+                    finger = 2
+            
             finger_assignments.append((key, finger))
-        return finger_assignments
+            self._last_finger = finger
+            self._last_key = key
+        
+        adjusted_assignments = []
+        for key, finger in finger_assignments:
+            if self._hand_side == HandSide.RIGHT:
+                adjusted_assignments.append((key, finger))
+            else:
+                adjusted_assignments.append((88 - key, 4 - finger))
+        
+        return adjusted_assignments
 
     def after_step(self, physics, random_state) -> None:
         # del random_state  # Unused.
@@ -1031,35 +1153,42 @@ class PianoWithOneShadowHand(base.PianoTask):
         # if self._t_idx == len(self._notes):
         #     print(f"Timestep {self._t_idx}: Reached end of notes")
         #     return
-        if self._t_idx >= len(self._notes):
-            print(f"Timestep {self._t_idx}: Reached end of notes")
-            self._keys = []
-            self._fingering_state = np.zeros((5,), dtype=np.float64)
-            return
+        # if self._t_idx >= len(self._notes):
+        #     print(f"Timestep {self._t_idx}: Reached end of notes")
+        #     self._keys = []
+        #     self._fingering_state = np.zeros((5,), dtype=np.float64)
+        #     return
         
-        self._keys = []
+        # self._keys = []
 
         notes = self._notes[self._t_idx]
+        # notes = self._notes
         print(f"Timestep {self._t_idx}: Notes to play: {notes}")
+        self._keys = self._assign_fingers(notes)
 
-        # Assign fingers to keys.
-        finger_assignments = self._assign_fingers(notes)
-        for key, finger in finger_assignments:
-            if self._hand_side == HandSide.RIGHT:
-                self._keys.append((key, finger))
-            else:
-                self._keys.append((key, finger - 5))
-
-        # Update fingering state
         self._fingering_state = np.zeros((5,), dtype=np.float64)
         for _, mjcf_fingering in self._keys:
             self._fingering_state[mjcf_fingering] = 1.0
 
-        # Update sustain peal state
-        for t, value in self._sustain_events:
-            if t == self._t_idx:
-                self._sustain_state = value
-                print(f"Timestep {self._t_idx}: Sustain state: {self._sustain_state}")
+        # Assign fingers to keys.
+        # print(f"notes: {notes}")
+        # finger_assignments = self._assign_fingers(notes)
+        # for key, finger in finger_assignments:
+        #     if self._hand_side == HandSide.RIGHT:
+        #         self._keys.append((key, finger))
+        #     else:
+        #         self._keys.append((key, finger - 5))
+
+        # # Update fingering state
+        # self._fingering_state = np.zeros((5,), dtype=np.float64)
+        # for _, mjcf_fingering in self._keys:
+        #     self._fingering_state[mjcf_fingering] = 1.0
+
+        # # Update sustain peal state
+        # for t, value in self._sustain_events:
+        #     if t == self._t_idx:
+        #         self._sustain_state = value
+        #         print(f"Timestep {self._t_idx}: Sustain state: {self._sustain_state}")
 
     def _add_observables(self) -> None:
         # Enable hand observables.

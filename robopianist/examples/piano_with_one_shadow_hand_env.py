@@ -31,6 +31,7 @@ from robopianist.suite.tasks import piano_with_one_shadow_hand
 from robopianist.suite.tasks.piano_with_one_shadow_hand import PianoWithOneShadowHand
 from robopianist.models.piano import piano_constants as piano_consts
 from robopianist import viewer, suite
+from robopianist.wrappers.evaluation import MidiEvaluationWrapper
 
 sys.path.append("/Users/shjulie/Desktop/BEng_Hons_Diss_TMP-main/robopianist/robopianist")
 
@@ -62,6 +63,20 @@ _ACTION_SEQUENCE = flags.DEFINE_string(
 )
 _N_SECONDS_LOOKAHEAD = flags.DEFINE_integer("n_seconds_lookahead", None, "")
 _WRONG_PRESS_TERMINATION = flags.DEFINE_bool("wrong_press_termination", False, "")
+_TIMESTEP_REWARDS_PATH = flags.DEFINE_string(
+    "timestep_rewards_path", "results/timestep_rewards.csv", "Path to save the timestep rewards."
+)
+_TIMESTEP_KEY_PRESS_REWARDS_PATH = flags.DEFINE_string(
+    "timestep_key_press_rewards_path", "results/timestep_key_press_rewards.csv", "Path to save the timestep key press rewards."
+)
+
+_TIMESTEP_ENERGY_REWARDS_PATH = flags.DEFINE_string(
+    "timestep_energy_rewards_path", "results/timestep_energy_rewards.csv", "Path to save the timestep energy rewards."
+)
+
+_TIMESTEP_FINGER_MOVEMENT_REWARDS_PATH = flags.DEFINE_string(
+    "timestep_finger_movement_rewards_path", "results/timestep_finger_movement_rewards.csv", "Path to save the timestep finger movement rewards."
+)
 
 # for load function:
 _BASE_REPERTOIRE_NAME = "RoboPianist-repertoire-150-{}-v0"
@@ -155,6 +170,7 @@ def main(_) -> None:
             initial_buffer_time=0.5,  # Match the buffer time used in the previous script
         ),
     )
+    wrapped_env = MidiEvaluationWrapper(env)
 
     task = env.task
     env.reset()
@@ -170,6 +186,8 @@ def main(_) -> None:
     # print(f"Fist action: {actions[0]}")
 
 
+
+
     if _EXPORT.value:
         export_with_assets(
             env.task.root_entity.mjcf_model,
@@ -182,9 +200,9 @@ def main(_) -> None:
         return
 
     if _RECORD.value:
-        env = PianoSoundVideoWrapper(env, record_every=1)
+        wrapped_env = PianoSoundVideoWrapper(wrapped_env, record_every=1)
     if _CANONICALIZE.value:
-        env = CanonicalSpecWrapper(env)
+        wrapped_env = CanonicalSpecWrapper(wrapped_env)
 
     class ActionSequencePlayer:
         def __init__(self) -> None:
@@ -214,22 +232,38 @@ def main(_) -> None:
 
     policy = ActionSequencePlayer()
 
-    if not _RECORD.value:
-        print("Running policy ...")
-        if _HEADLESS.value:
-            print("Running headless ...")
-            timestep = env.reset()
+    print("Running policy ...")
+    timestep = wrapped_env.reset()
+    step_count = 0
+
+    if _HEADLESS.value:
+        # print("Running headless ...")
+        # while not timestep.last():
+        #     action = policy(timestep)
+        #     timestep = wrapped_env.step(action)
+        #     step_count += 1
+        #     print(f"Step {step_count}: Reward: {timestep.reward}")
+        # print(f"Episod completed in {step_count} steps")
+        viewer.launch(wrapped_env, policy = policy)
+    else:
+        print("Running with viewer ...")
+        with mujoco_viewer.launch_passive(
+            wrapped_env.physics.model.ptr, wrapped_env.physics.data.ptr
+        ) as mujoco_viewer_handle:
             while not timestep.last():
                 action = policy(timestep)
-                timestep = env.step(action)
-        else:
-            print("Running viewer ...")
-            viewer.launch(env, policy=policy)
-    else:
-        timestep = env.reset()
-        while not timestep.last():
-            action = policy(timestep)
-            timestep = env.step(action)
+                timestep = wrapped_env.step(action)
+                step_count += 1
+                mujoco_viewer_handle.sync()
+                print(f"Step {step_count}: Reward: {timestep.reward}")
+                time.sleep(_CONTROL_TIMESTEP.value)
+        print(f"Episode completed in {step_count} steps")
+    
+
+    wrapped_env.save_timestep_rewards(_TIMESTEP_REWARDS_PATH.value)
+    wrapped_env.save_timestep_energy_rewards(_TIMESTEP_ENERGY_REWARDS_PATH.value)
+    wrapped_env.save_timestep_finger_movement_rewards(_TIMESTEP_FINGER_MOVEMENT_REWARDS_PATH.value)
+    wrapped_env.save_timestep_key_press_rewards(_TIMESTEP_KEY_PRESS_REWARDS_PATH.value)
 
 if __name__ == "__main__":
     app.run(main)
