@@ -144,10 +144,12 @@ class PianoWithOneShadowHand(base.PianoTask):
             self._full_joints_one_array = [f"rh_shadow_hand/{j}" for j in _FULL_JOINTS_ONE_ARRAY]
             self._wrist_joints = [f"rh_shadow_hand/{j}" for j in _WRIST_JOINTS]
         
+
         if not disable_fingering_reward and not disable_colorization:
             self._colorize_fingertips()
         self._reset_quantities_at_episode_init()
         self._reset_trajectory(self._midi)  # Important: call before adding observables.
+        self._thumb_under = False
         self._last_finger = None
         self._last_key = None
         self._add_observables()
@@ -618,6 +620,40 @@ class PianoWithOneShadowHand(base.PianoTask):
         print(f"Updating hand position at timestep {self._t_idx}...")
         print(f"Current keys to play: {self._keys_current}")
 
+        thumb_assigned = any(finger == 0 for _, finger in self._keys_current)
+        if self._thumb_under and thumb_assigned:
+            print("Thumb-under detected: Adjusting wrist position...")
+
+            wirst_site = self._hand.mjcf_model.find("site", "rh_WRJ1_site")
+            full_wrist_site = f"rh_shadow_hand/{wirst_site.name}"
+            wrist_pos = physics.named.data.site_xpos[full_wrist_site]
+
+            target_wrist_pos = wrist_pos.copy()
+            target_wrist_pos[0] -= 0.05
+            target_wrist_pos[2] += 0.01
+
+            ik_result = qpos_from_site_pose(
+                physics,
+                full_wrist_site,
+                target_wrist_pos,
+                None,
+                self._wrist_joints,
+                tol=1e-2,
+                max_steps=200,
+                regularization_threshold=0.01,
+                regularization_strength=0.1,
+            )
+
+            if ik_result.success:
+                print(f"Wrist IK successful, new wrist pos: {target_wrist_pos}")
+                for joint_name in self._wrist_joints:
+                    joint_idx = physics.model.name2id(joint_name, "joint")
+                    physics.data.qpos[joint_idx] = ik_result.qpos[joint_idx]
+                mujoco.mj_forward(physics.model.ptr, physics.data.ptr)
+            else:
+                print("Wrist IK failed, skipping adjustment")
+
+
         # Generate new trajectories for active fingers only if the target key has changed
         for key, mjcf_fingering in self._keys_current:
             if self._last_planned_keys[mjcf_fingering] != key or not self._trajectories[mjcf_fingering]:
@@ -696,11 +732,13 @@ class PianoWithOneShadowHand(base.PianoTask):
                                     if (hasattr(act, "joint") and act.joint is not None and act.joint.name in joint_name)
                                 )
                             actuator = self._hand.actuators[action_idx]
+                            action[action_idx] = 50.0 * error
+
                             print(f"Matched actuator for joint {joint_name}: {actuator.name}")
                         except StopIteration:
                             print(f"No actuator found for joint {joint_name}")
                             raise
-                        action[action_idx] = 50.0 * error
+                        # action[action_idx] = 50.0 * error
                         print(f"Finger {finger}, Joint {joint_name}, Position error: {error: 4f}, Action: {action[action_idx]: 4f}")
                     
                     self._traj_steps[finger] += 1
@@ -803,7 +841,7 @@ class PianoWithOneShadowHand(base.PianoTask):
         self._maybe_change_midi(random_state)
         self._resting_qpos = self._set_resting_position(physics)
 
-    def _assign_fingers(self, notes):
+    def _assign_fingers(self, notes) -> Tuple[List[Tuple[int, int]], bool]:
         # Simple heuristic for finger assignment based on key position
         # finger_assignments = []
         # for note in notes:
@@ -836,16 +874,21 @@ class PianoWithOneShadowHand(base.PianoTask):
             A list of finger assignments for each note. (key, finger)
         """
 
-        if not notes:
-            return []
-        
+        if not notes or not isinstance(notes, list):
+            print(f"Timestep {self._t_idx}: No valid notes provided, returning empty assignment")
+            return ([], False)
 
-        
-        keys = [note.pitch - 21 for note in notes]
+        try:
+            keys = [note.pitch - 21 for note in notes]
+        except AttributeError:
+            print(f"Timestep {self._t_idx}: Invalid note format in {notes}, returning empty assignment")
+            return ([], False)
+
         keys.sort()
-        print(f"Timestep {self._t_idx}: Keys to press: {keys}")
+        print(f"Timestep {self._t_idx}: Keys to assign: {keys}")
 
         finger_assignments = []
+        thumb_under = False
         # last_finger = None
         # last_key = None
 
@@ -916,13 +959,15 @@ class PianoWithOneShadowHand(base.PianoTask):
                 # Rule 3: Thumb under ring if adjacent
                 if self._last_finger == 2 and key_distance == 1:
                     finger = 0
+                    thumb_under = True
                 elif abs(key_distance) <= 3:
-                    if self._last_finger == 0:
-                        finger = 1 # Index
-                    elif self._last_finger == 1:
-                        finger = 2
-                    else:
-                        finger = 0
+                    # if self._last_finger == 0:
+                    #     finger = 1 # Index
+                    # elif self._last_finger == 1:
+                    #     finger = 2
+                    # else:
+                    #     finger = 0
+                    finger = (self._last_finger + 1) % 3
                 else:
                     finger = 2
             
@@ -936,8 +981,9 @@ class PianoWithOneShadowHand(base.PianoTask):
                 adjusted_assignments.append((key, finger))
             else:
                 adjusted_assignments.append((88 - key, 4 - finger))
-        
-        return adjusted_assignments
+        print(adjusted_assignments)
+        print(thumb_under)
+        return (adjusted_assignments, thumb_under)
 
     def after_step(self, physics, random_state) -> None:
         # del random_state  # Unused.
@@ -1049,6 +1095,7 @@ class PianoWithOneShadowHand(base.PianoTask):
     def before_step(self, physics, action, random_state) -> None:
         sustain = action[-1]
         self.piano.apply_sustain(physics, sustain, random_state)
+        # print(f"Hand action shape={action[:-1].shape}")
         self._hand.apply_action(physics, action, random_state) #action[:-1] when generating action npy
         # pass
 
@@ -1144,10 +1191,11 @@ class PianoWithOneShadowHand(base.PianoTask):
             # self._goal_state[i, -1] = self._sustains[t]
 
     def _update_fingering_state(self) -> None:
-        if not self._notes:
-            print(f"Timestep {self._t_idx}: No notes to play")
+        if not hasattr(self, '_notes') or not self._notes or self._t_idx >= len(self._notes):
+            print(f"Timestep {self._t_idx}: No notes or uninitialized, resetting state")
             self._keys = []
             self._fingering_state = np.zeros((5,), dtype=np.float64)
+            self._thumb_under = False
             return
         
         # if self._t_idx == len(self._notes):
@@ -1164,7 +1212,7 @@ class PianoWithOneShadowHand(base.PianoTask):
         notes = self._notes[self._t_idx]
         # notes = self._notes
         print(f"Timestep {self._t_idx}: Notes to play: {notes}")
-        self._keys = self._assign_fingers(notes)
+        self._keys, self._thumb_under = self._assign_fingers(notes)
 
         self._fingering_state = np.zeros((5,), dtype=np.float64)
         for _, mjcf_fingering in self._keys:

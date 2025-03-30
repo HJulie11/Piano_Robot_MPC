@@ -134,7 +134,8 @@ def create_simple_midi_file(path: Path) -> None:
     mid.tracks.append(track)
 
     # Add notes for "Twinkle, Twinkle, Little Star" (C4, C4, G4, G4, A4, A4, G4)
-    notes = [60, 60, 67, 67, 69, 69, 67]  # MIDI note numbers
+    # notes = [60, 60, 67, 67, 69, 69, 67]  # MIDI note numbers
+    notes = [60, 62, 64, 65]  # MIDI note numbers
     time = 0
     for note in notes:
         track.append(mido.Message("note_on", note=note, velocity=64, time=time))
@@ -185,7 +186,9 @@ def main(_) -> None:
     print(f"Trajectory: {actions}")
     # print(f"Fist action: {actions[0]}")
 
-
+    action_spec = wrapped_env.action_spec()
+    zeros = np.zeros(action_spec.shape, dtype=action_spec.dtype)
+    zeros[-1] = -1.0  # Disable sustain pedal.
 
 
     if _EXPORT.value:
@@ -229,6 +232,7 @@ def main(_) -> None:
             else:
                 print(f"Step {self._idx}: Reached end of action sequence, repeating last action")
                 return self._actions[-1]
+                # return zeros[:-1]
 
     policy = ActionSequencePlayer()
 
@@ -237,7 +241,7 @@ def main(_) -> None:
     step_count = 0
 
     if _HEADLESS.value:
-        # print("Running headless ...")
+        print("Running headless ...")
         # while not timestep.last():
         #     action = policy(timestep)
         #     timestep = wrapped_env.step(action)
