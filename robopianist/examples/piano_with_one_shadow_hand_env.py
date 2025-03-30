@@ -136,6 +136,7 @@ def create_simple_midi_file(path: Path) -> None:
     # Add notes for "Twinkle, Twinkle, Little Star" (C4, C4, G4, G4, A4, A4, G4)
     # notes = [60, 60, 67, 67, 69, 69, 67]  # MIDI note numbers
     notes = [60, 62, 64, 65]  # MIDI note numbers
+    # notes = [48, 50, 52, 53]
     time = 0
     for note in notes:
         track.append(mido.Message("note_on", note=note, velocity=64, time=time))
@@ -145,7 +146,6 @@ def create_simple_midi_file(path: Path) -> None:
     mid.save(str(path))
 
 def main(_) -> None:
-
     # Create a test MIDI file
     test_midi_path = Path("test_twinkle.mid")
     create_simple_midi_file(test_midi_path)
@@ -168,7 +168,7 @@ def main(_) -> None:
             disable_colorization=_DISABLE_COLORIZATION.value,
             attachment_yaw=_ATTACHMENT_YAW.value,
             hand_side=shadow_hand.HandSide.RIGHT,
-            initial_buffer_time=0.5,  # Match the buffer time used in the previous script
+            initial_buffer_time=0.5,
         ),
     )
     wrapped_env = MidiEvaluationWrapper(env)
@@ -178,18 +178,13 @@ def main(_) -> None:
     print(env.task.midi)
     trajectory = task.get_action_trajectory(env.physics)
 
-    # Remove the manual IK and action construction
-    # We’ll rely on the saved action sequence instead
-    # actions = np.load("action_sequence.npy")
     actions = trajectory
     print(f"Action sequence shape: {len(actions)}")
     print(f"Trajectory: {actions}")
-    # print(f"Fist action: {actions[0]}")
 
     action_spec = wrapped_env.action_spec()
     zeros = np.zeros(action_spec.shape, dtype=action_spec.dtype)
     zeros[-1] = -1.0  # Disable sustain pedal.
-
 
     if _EXPORT.value:
         export_with_assets(
@@ -203,7 +198,7 @@ def main(_) -> None:
         return
 
     if _RECORD.value:
-        wrapped_env = PianoSoundVideoWrapper(wrapped_env, record_every=1)
+        wrapped_env = robopianist.wrappers.PianoSoundVideoWrapper(wrapped_env, record_every=1)
     if _CANONICALIZE.value:
         wrapped_env = CanonicalSpecWrapper(wrapped_env)
 
@@ -215,24 +210,21 @@ def main(_) -> None:
             if _ACTION_SEQUENCE.value is not None:
                 self._idx = 0
                 self._actions = np.array(actions)
-                # np.load(_ACTION_SEQUENCE.value)
                 print(f"Loaded action sequence with shape {self._actions.shape}")
             else:
                 self._idx = 0
                 self._actions = np.zeros(22)
 
         def __call__(self, timestep):
-            del timestep
             if self._idx < len(self._actions):
                 action = self._actions[self._idx]
                 self._idx += 1
                 print(f"Step {self._idx}: Action: {action}")
                 print(f"action shape: {action.shape}")
-                return action[:-1]
+                return action
             else:
                 print(f"Step {self._idx}: Reached end of action sequence, repeating last action")
                 return self._actions[-1]
-                # return zeros[:-1]
 
     policy = ActionSequencePlayer()
 
@@ -242,27 +234,24 @@ def main(_) -> None:
 
     if _HEADLESS.value:
         print("Running headless ...")
-        # while not timestep.last():
-        #     action = policy(timestep)
-        #     timestep = wrapped_env.step(action)
-        #     step_count += 1
-        #     print(f"Step {step_count}: Reward: {timestep.reward}")
-        # print(f"Episod completed in {step_count} steps")
-        viewer.launch(wrapped_env, policy = policy)
+        viewer.launch(wrapped_env, policy=policy)
     else:
         print("Running with viewer ...")
         with mujoco_viewer.launch_passive(
             wrapped_env.physics.model.ptr, wrapped_env.physics.data.ptr
         ) as mujoco_viewer_handle:
-            while not timestep.last():
+            while mujoco_viewer_handle.is_running() and not timestep.last():
                 action = policy(timestep)
-                timestep = wrapped_env.step(action)
-                step_count += 1
-                mujoco_viewer_handle.sync()
-                print(f"Step {step_count}: Reward: {timestep.reward}")
-                time.sleep(_CONTROL_TIMESTEP.value)
-        print(f"Episode completed in {step_count} steps")
-    
+                try:
+                    timestep = wrapped_env.step(action)
+                    step_count += 1
+                    mujoco_viewer_handle.sync()
+                    print(f"Step {step_count}: Reward: {timestep.reward}")
+                    time.sleep(_CONTROL_TIMESTEP.value)
+                except Exception as e:
+                    print(f"Error during step: {e}")
+                    break
+            print(f"Episode completed in {step_count} steps or viewer closed")
 
     wrapped_env.save_timestep_rewards(_TIMESTEP_REWARDS_PATH.value)
     wrapped_env.save_timestep_energy_rewards(_TIMESTEP_ENERGY_REWARDS_PATH.value)
