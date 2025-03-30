@@ -20,7 +20,6 @@ from dm_env_wrappers import CanonicalSpecWrapper
 from mujoco import viewer as mujoco_viewer
 from mujoco_utils import composer_utils
 import xml.etree.ElementTree as ET
-from robopianist.utils import plot_distance_to_keys, plot_fingertip_positions, plot_fingertip_trajectories_3d, plot_joint_positions, animate_hand_motion
 
 import mido
 
@@ -32,9 +31,8 @@ from robopianist.suite.tasks import piano_with_one_shadow_hand
 from robopianist.suite.tasks.piano_with_one_shadow_hand import PianoWithOneShadowHand
 from robopianist.models.piano import piano_constants as piano_consts
 from robopianist import viewer, suite
-from robopianist.wrappers.evaluation import MidiEvaluationWrapper
 
-# sys.path.append("/Users/shjulie/Desktop/BEng_Hons_Diss_TMP-main/robopianist/robopianist")
+sys.path.append("/Users/shjulie/Desktop/BEng_Hons_Diss_TMP-main/robopianist/robopianist")
 
 _ENV_NAME = flags.DEFINE_string(
     "env_name", "RoboPianist-debug-TwinkleTwinkleLittleStar-v0", ""
@@ -64,20 +62,6 @@ _ACTION_SEQUENCE = flags.DEFINE_string(
 )
 _N_SECONDS_LOOKAHEAD = flags.DEFINE_integer("n_seconds_lookahead", None, "")
 _WRONG_PRESS_TERMINATION = flags.DEFINE_bool("wrong_press_termination", False, "")
-_TIMESTEP_REWARDS_PATH = flags.DEFINE_string(
-    "timestep_rewards_path", "results/timestep_rewards.csv", "Path to save the timestep rewards."
-)
-_TIMESTEP_KEY_PRESS_REWARDS_PATH = flags.DEFINE_string(
-    "timestep_key_press_rewards_path", "results/timestep_key_press_rewards.csv", "Path to save the timestep key press rewards."
-)
-
-_TIMESTEP_ENERGY_REWARDS_PATH = flags.DEFINE_string(
-    "timestep_energy_rewards_path", "results/timestep_energy_rewards.csv", "Path to save the timestep energy rewards."
-)
-
-_TIMESTEP_FINGER_MOVEMENT_REWARDS_PATH = flags.DEFINE_string(
-    "timestep_finger_movement_rewards_path", "results/timestep_finger_movement_rewards.csv", "Path to save the timestep finger movement rewards."
-)
 
 # for load function:
 _BASE_REPERTOIRE_NAME = "RoboPianist-repertoire-150-{}-v0"
@@ -142,21 +126,7 @@ def create_simple_midi_file(path: Path) -> None:
         track.append(mido.Message("note_off", note=note, velocity=64, time=500))  # 500 ticks = 0.5 seconds
         time = 0  # Reset time for the next note_on
 
-    # mid.save(str(path))
-
-    # mid = mido.MidiFile()
-    # track = mido.MidiTrack()
-    # mid.tracks.append(track)
-
-    # # Add notes for "Twinkle, Twinkle, Little Star" (C4, D4, E4)
-    # notes = [60, 61, 62]  # MIDI note numbers
-    # time = 0
-    # for note in notes:
-    #     track.append(mido.Message("note_on", note=note, velocity=64, time=time))
-    #     track.append(mido.Message("note_off", note=note, velocity=64, time=500))  # 500 ticks = 0.5 seconds
-    #     time = 0  # Reset time for the next note_on
-
-    # mid.save(str(path))
+    mid.save(str(path))
 
 def main(_) -> None:
 
@@ -186,13 +156,10 @@ def main(_) -> None:
         ),
     )
 
-    wrapped_env = MidiEvaluationWrapper(env, deque_size=1)
-
     task = env.task
     env.reset()
     print(env.task.midi)
-    simulation_data = task.get_action_trajectory(env.physics)
-    trajectory = simulation_data["trajectory"]
+    trajectory = task.get_action_trajectory(env.physics)
 
     # Remove the manual IK and action construction
     # We’ll rely on the saved action sequence instead
@@ -200,6 +167,8 @@ def main(_) -> None:
     actions = trajectory
     print(f"Action sequence shape: {len(actions)}")
     print(f"Trajectory: {actions}")
+    # print(f"Fist action: {actions[0]}")
+
 
     if _EXPORT.value:
         export_with_assets(
@@ -213,12 +182,9 @@ def main(_) -> None:
         return
 
     if _RECORD.value:
-        # env = PianoSoundVideoWrapper(env, record_every=1)
-        wrapped_env = PianoSoundVideoWrapper(wrapped_env, record_every=1)
-
+        env = PianoSoundVideoWrapper(env, record_every=1)
     if _CANONICALIZE.value:
-        # env = CanonicalSpecWrapper(env)
-        wrapped_env = CanonicalSpecWrapper(wrapped_env)
+        env = CanonicalSpecWrapper(env)
 
     class ActionSequencePlayer:
         def __init__(self) -> None:
@@ -248,73 +214,22 @@ def main(_) -> None:
 
     policy = ActionSequencePlayer()
 
-    # if not _RECORD.value:
-    #     print("Running policy ...")
-    #     if _HEADLESS.value:
-    #         print("Running headless ...")
-    #         timestep = env.reset()
-    #         while not timestep.last():
-    #             action = policy(timestep)
-    #             timestep = env.step(action)
-    #     else:
-    #         print("Running viewer ...")
-    #         viewer.launch(env, policy=policy)
-    # else:
-    #     timestep = env.reset()
-    #     while not timestep.last():
-    #         action = policy(timestep)
-    #         timestep = env.step(action)
-
-    # Run the episode in a controlled loop to ensure completion
-    
-
-    print("Running policy ...")
-    timestep = wrapped_env.reset()
-    step_count = 0
-
-    if _HEADLESS.value:
-        print("Running headless ...")
-        while not timestep.last():
-            action = policy(timestep)
-            timestep = wrapped_env.step(action)
-            step_count += 1
-            print(f"Step {step_count}: Reward: {timestep.reward}")
-        print(f"Episode completed in {step_count} steps")
-        viewer.launch(wrapped_env, policy=policy)
-        # # plot_fingertip_positions(trajectory, physics, self._hand, self._hand_side, timesteps)
-        # plot_distance_to_keys(simulation_data) #trajectory, wrapped_env.physics, wrapped_env.task, wrapped_env.task._hand_side, simulation_data["keys_current_history"], timestep
-        # # plot_joint_positions(trajectory, physics, self._full_actuator, timesteps)
-        # # plot_fingertip_trajectories_3d(trajectory, physics, self._hand_side, timesteps)
-        # # animate_hand_motion(trajectory, physics, self._hand_side, timesteps)
-    else:
-        print("Running with viewer ...")
-        with mujoco_viewer.launch_passive(
-            wrapped_env.physics.model.ptr, wrapped_env.physics.data.ptr
-        ) as mujoco_viewer_handle:
+    if not _RECORD.value:
+        print("Running policy ...")
+        if _HEADLESS.value:
+            print("Running headless ...")
+            timestep = env.reset()
             while not timestep.last():
                 action = policy(timestep)
-                timestep = wrapped_env.step(action)
-                step_count += 1
-                mujoco_viewer_handle.sync()
-                print(f"Step {step_count}: Reward: {timestep.reward}")
-                time.sleep(_CONTROL_TIMESTEP.value)
-        print(f"Episode completed in {step_count} steps")
+                timestep = env.step(action)
+        else:
+            print("Running viewer ...")
+            viewer.launch(env, policy=policy)
+    else:
+        timestep = env.reset()
+        while not timestep.last():
+            action = policy(timestep)
+            timestep = env.step(action)
 
-        # viewer.launch(wrapped_env, policy=policy)
-
-
-    # Save the timestep rewards to a CSV file
-    # print(env.task._reward_fn.reward_fns)
-    # print("key_press", env.task._reward_fn.reward_fns["key_press_reward"](env.physics))
-    # print("energy", env.task._reward_fn.reward_fns["energy_reward"])
-    # print("finger_movement_reward", env.task._reward_fn.reward_fns["finger_movement_reward"])
-    # print(env.task.get_reward(env.physics))
-    # return 
-
-    wrapped_env.save_timestep_rewards(_TIMESTEP_REWARDS_PATH.value)
-    wrapped_env.save_timestep_energy_rewards(_TIMESTEP_ENERGY_REWARDS_PATH.value)
-    wrapped_env.save_timestep_finger_movement_rewards(_TIMESTEP_FINGER_MOVEMENT_REWARDS_PATH.value)
-    wrapped_env.save_timestep_key_press_rewards(_TIMESTEP_KEY_PRESS_REWARDS_PATH.value)
-    
 if __name__ == "__main__":
     app.run(main)

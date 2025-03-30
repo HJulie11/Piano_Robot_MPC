@@ -1361,4 +1361,96 @@ class PianoWithOneShadowHand(base.PianoTask):
             if not self.piano.activation[key]:
                 physics.bind(key_geom).rgba = tuple(fingertip_site.rgba[:3]) + (1.0,)
 
+
+
+# one another version
+def _assign_fingers(self, notes):
+
+        """
+        Assign fingers (thumb, index, middle) to notes based on the rules below:
+        1. If notes are <= 2 keys apart, assign thumb (0), index (1), middle (2) in order.
+        2. If notes are > 2 keys apart, use the middle finger (2) for the next note.
+        3. Allow thumb to go underneath index or middle finger 
+           if the next key is right next to the key pressed by the middle finger, 
+           then arrange fingers naturally.
+
+        Args:
+            notes: A list of notes to assign fingers to.
+
+        Returns:
+            A list of finger assignments for each note. (key, finger)
+        """
+
+        if not notes:
+            return []
+        
+        # Convert notes to key indices (MIDI pitch - 21 to map to piano keys 1-88)
+        keys = [note.pitch - 21 for note in notes]
+        keys.sort() # Sort keys in ascending order to process them from left to right.
+
+        finger_assignments = []
+        last_finger = None
+        last_key = None
+
+        for i, key in enumerate(keys):
+            # First note: Start with the thumb.
+            if i == 0:
+                finger = 0 # Thumb
+            else:
+                key_distance = key - last_key
+                # If clos to the last key, use the next finger
+                if last_finger == 2 and key_distance == 1:
+                    finger = 0
+                elif key_distance <= 3:
+                    if last_finger == 0:
+                        finger = 1
+                    elif last_finger == 1:
+                        finger = 2
+                    else:
+                        finger = 0
+                else:
+                    finger = 2 if last_finger != 2 else 1
+
+            print(f"Assinging key {key} to finger {finger}")
+            finger_assignments.append((key, finger))
+            last_finger = finger
+            last_key = key
+            
+            # # Compute the distance between the current key and the last key.
+            # key_distance = key - last_key
+
+            # # Rule 2: Check if thumb should go underneeath
+            # if last_finger == 2 and key_distance == 1:
+            #     finger = 0 # Thumb
+            #     finger_assignments.append((key, finger))
+            #     last_finger = finger
+            #     last_key = key
+            #     continue
                 
+            # # Rule 1: If the distance is less than or equal to 2, assign the next finger.
+            # if key_distance <= 3:
+            #     if last_finger == 0:
+            #         finger = 1
+            #     elif last_finger == 1:
+            #         finger = 2
+            #     else:
+            #         finger = 0
+            # else:
+            #     finger = 2
+            
+            # finger_assignments.append((key, finger))
+            # last_finger = finger
+            # last_key = key
+        
+        # Adjust for hand side (if left hand, fingers are shifted).
+        # adjusted_assignments = []
+        # for key, finger in finger_assignments:
+        #     if self._hand_side == HandSide.RIGHT:
+        #         adjusted_assignments.append((key, finger))
+        #     else:
+        #         adjusted_assignments.append((88 - key, 4 - finger))
+
+        # print(f"Finger assignments: {adjusted_assignments}")
+        
+        # return adjusted_assignments
+        return finger_assignments
