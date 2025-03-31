@@ -154,6 +154,7 @@ class PianoWithOneShadowHand(base.PianoTask):
         self._thumb_under = False
         self._last_finger = None
         self._last_key = None
+        self._metrics = {"collition_rate": 0, "success_rate": 0, "planning_time": 0}
         self._add_observables()
         self._set_rewards()
 
@@ -735,83 +736,8 @@ class PianoWithOneShadowHand(base.PianoTask):
         action[-1] = self._sustain_state
         self._hand.apply_action(physics, action[:-1], random_state=None)
         self._last_action = action
-
-                # Compute dynamics data
-        dynamics_data = {
-            "fingertip_velocities": [],
-            "joint_accelerations": [],
-            "contact_forces": [],
-            "energy": [],
-        }
-
-        # Fingertip velocities
-        for finger in range(5):
-            site_name = self._hand.fingertip_sites[finger].name
-            full_site_name = f"rh_shadow_hand/{site_name}" if self._hand_side == HandSide.RIGHT else f"lh_shadow_hand/{site_name}"
-            # fingertip_vel = physics.named.data.site_xvelp[full_site_name].copy()
-            # dynamics_data["fingertip_velocities"].append(fingertip_vel)
-
-            site_idx = physics.model.name2id(full_site_name, "site")
-            nq = physics.model.nq
-            jacp = np.zeros((3, nq))  # Translational Jacobian
-            jacr = np.zeros((3, nq))  # Rotational Jacobian (not needed)
-            mujoco.mj_jacSite(physics.model.ptr, physics.data.ptr, jacp, jacr, site_idx)
-            qvel = physics.data.qvel  # Joint velocities
-            fingertip_vel = jacp @ qvel  # Linear velocity (vx, vy, vz)
-            dynamics_data["fingertip_velocities"].append(fingertip_vel)
-
-        # Joint accelerations
-        for finger in range(5):
-            joint_indices = []
-            for joint_name in self._finger_joints[finger]:
-                if "J0" in joint_name:
-                    joint_idx = physics.model.name2id(joint_name, "tendon")
-                else:
-                    joint_idx = physics.model.name2id(joint_name, "joint")
-                # joint_idx = physics.model.name2id(joint_name, "joint")
-                # if joint_idx == -1:
-                #     joint_idx = physics.model.name2id(joint_name, "tendon")
-                # if joint_idx != -1:
-                joint_indices.append(joint_idx)
-            joint_acc = physics.data.qacc[joint_indices].copy() if joint_indices else np.zeros(len(self._finger_joints[finger]))
-            dynamics_data["joint_accelerations"].append(joint_acc)
-
-        # Contact forces at fingertips
-        for finger in range(5):
-            site_name = self._hand.fingertip_sites[finger].name
-            full_site_name = f"rh_shadow_hand/{site_name}" if self._hand_side == HandSide.RIGHT else f"lh_shadow_hand/{site_name}"
-            site_idx = physics.model.name2id(full_site_name, "site")
-            distal_body_idx = physics.model.site_bodyid[site_idx]
-            # contact_force = physics.data.cfrc_ext[site_idx].copy() if site_idx != -1 else np.zeros(6)
-            # dynamics_data["contact_forces"].append(contact_force)
-
-            print(f"Finger {finger}: full_site_name = {full_site_name}, site_idx = {site_idx}, nsite = {physics.model.nsite}")
-            if site_idx == -1 or site_idx >= physics.model.nsite:
-                print(f"Warning: Invalid site index {site_idx} for site {full_site_name}, using zeros")
-                contact_force = np.zeros(6)
-            else:
-                contact_force = physics.data.cfrc_ext[distal_body_idx].copy()
-            dynamics_data["contact_forces"].append(contact_force)
-
-        # Energy consumption
-        total_energy = 0.0
-        for finger in range(5):
-            joint_indices = []
-            for joint_name in self._finger_joints[finger]:
-                if "J0" in joint_name:
-                    joint_idx = physics.model.name2id(joint_name, "tendon")
-                else:
-                    joint_idx = physics.model.name2id(joint_name, "joint")
-                joint_indices.append(joint_idx)
-            qfrc_actuator = physics.data.qfrc_actuator[joint_indices]
-            qvel = physics.data.qvel[joint_indices]
-            power = np.dot(qfrc_actuator, qvel)
-            energy = power * self.control_timestep
-            total_energy += energy
-        dynamics_data["energy"].append(total_energy)
-
         print(f"Hand position update took {time.time() - start_time:.2f} seconds")
-        return action, dynamics_data
+        return action
     
     def _set_resting_position(self, physics) -> np.ndarray:
         """Set the hand to a resting position with fingers slightly bent and hand near key 38."""
@@ -1053,8 +979,8 @@ class PianoWithOneShadowHand(base.PianoTask):
         should_not_be_pressed = np.flatnonzero(1 - self._goal_current[:-1])
         self._failure_termination = self.piano.activation[should_not_be_pressed].any()
 
-        action, _ = self._update_hand_position(physics)
-        # print(f"action shape: {action.shape}")
+        action = self._update_hand_position(physics)
+        print(f"action shape: {action.shape}")
 
         self._hand.apply_action(physics, action[:-1], random_state)
         self._last_action = action
@@ -1122,27 +1048,15 @@ class PianoWithOneShadowHand(base.PianoTask):
 
         trajectory = []
         for t in range(len(self._notes)):
-            all_dynamics_data = {
-                "fingertip_velocities": [],
-                "joint_accelerations": [],
-                "contact_forces": [],
-                "energy": [],
-            }
             print(f"Processing timestep {t}...")
             self._t_idx = t
             self._update_fingering_state()
             self._keys_current = self._keys
-            action, dynamics = self._update_hand_position(physics)
-
-            all_dynamics_data["fingertip_velocities"].append(dynamics["fingertip_velocities"])
-            all_dynamics_data["joint_accelerations"].append(dynamics["joint_accelerations"])
-            all_dynamics_data["contact_forces"].append(dynamics["contact_forces"])
-            all_dynamics_data["energy"].append(dynamics["energy"])
-
+            action = self._update_hand_position(physics)
             print(f"Action at timestep {t}: {action}")
             trajectory.append(action)
         print(f"Trajectory length: {len(trajectory)}")
-        return trajectory, all_dynamics_data
+        return trajectory
 
     def before_step(self, physics, action, random_state) -> None:
         sustain = action[-1]
@@ -1359,3 +1273,6 @@ class PianoWithOneShadowHand(base.PianoTask):
             fingertip_site = self._hand.fingertip_sites[mjcf_fingering]
             if not self.piano.activation[key]:
                 physics.bind(key_geom).rgba = tuple(fingertip_site.rgba[:3]) + (1.0,)
+
+    def get_action(self, physics):
+        return self._update_hand_position(physics)

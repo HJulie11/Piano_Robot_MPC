@@ -14,7 +14,7 @@ from dm_control.mjcf import export_with_assets
 from mujoco import viewer as mujoco_viewer
 from robopianist import music
 from robopianist.wrappers.evaluation import MidiEvaluationWrapper
-import robopianist.suite.tasks.piano_with_one_shadow_hand_no_dynamics as TaskNoDynamics
+import robopianist.robopianist.suite.tasks.piano_with_one_shadow_hand_only_mp as TaskNoDynamics
 import robopianist.suite.tasks.piano_with_one_shadow_hand_with_dynamics as TaskWithDynamics
 import robopianist.suite.tasks.piano_with_one_shadow_hand_controller as TaskController
 from robopianist.models.hands.base import HandSide
