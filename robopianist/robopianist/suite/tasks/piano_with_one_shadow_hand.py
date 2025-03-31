@@ -273,7 +273,7 @@ class PianoWithOneShadowHand(base.PianoTask):
 
         # Adjust key position for pressing
         press_pos = key_pos.copy()
-        press_pos[2] += 0.005
+        press_pos[2] -= 0.01
         print(f"Adjusted press position (just above key): {press_pos}")
 
         # Convert press_pos to the fingertip's local frame
