@@ -135,8 +135,8 @@ def create_simple_midi_file(path: Path) -> None:
 
     # Add notes for "Twinkle, Twinkle, Little Star" (C4, C4, G4, G4, A4, A4, G4)
     # notes = [60, 60, 67, 67, 69, 69, 67]  # MIDI note numbers
-    notes = [60, 62, 64, 65]  # MIDI note numbers
-    # notes = [48, 50, 52, 53]
+    # notes = [60, 62, 64, 65]  # MIDI note numbers
+    notes = [48, 50, 52, 53]
     time = 0
     for note in notes:
         track.append(mido.Message("note_on", note=note, velocity=64, time=time))

@@ -145,7 +145,7 @@ def run_experiment(task_class, name, output_dir):
     pd.DataFrame(flat_metrics).to_csv(f"{output_dir}/{name}_custom_metrics.csv", index=False)
 
 def main(_):
-    run_experiment(TaskNoDynamics.PianoWithOneShadowHand, "no_dynamics", FLAGS.output_dir)
+    run_experiment(TaskNoDynamics.PianoWithOneShadowHand, "with_dynamics", FLAGS.output_dir)
     # Uncomment these when you add the other task classes
     # run_experiment(TaskWithDynamics.PianoWithOneShadowHand, "with_dynamics", FLAGS.output_dir)
     # run_experiment(TaskController.PianoWithOneShadowHand, "controller", FLAGS.output_dir)
