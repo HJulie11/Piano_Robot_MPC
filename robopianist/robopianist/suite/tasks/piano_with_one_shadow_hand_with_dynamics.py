@@ -41,17 +41,17 @@ _ENERGY_PENALTY_COEF = 5e-3
 
 _NUM_STEPS_PER_SEGMENT = 10
 
-_FINGER_JOINTS = [
-    ['rh_THJ5', 'rh_THJ4', 'rh_THJ3', 'rh_THJ2', 'rh_THJ1'],
-    ['rh_FFJ4', 'rh_FFJ3', 'rh_FFJ0'],
-    ['rh_MFJ4', 'rh_MFJ3', 'rh_MFJ0'],
-    ['rh_RFJ4', 'rh_RFJ3', 'rh_RFJ0'],
-    ['rh_LFJ5', 'rh_LFJ4', 'rh_LFJ3', 'rh_LFJ0'],
-]
-
 _WRIST_JOINTS = ['rh_WRJ2', 'rh_WRJ1']
 
 _FOREARM_JOINTS = ['forearm_tx', 'forearm_ty']
+
+_FINGER_JOINTS = [
+    _WRIST_JOINTS + ['rh_THJ5', 'rh_THJ4', 'rh_THJ3', 'rh_THJ2', 'rh_THJ1'] + _FOREARM_JOINTS,
+    _WRIST_JOINTS + ['rh_FFJ4', 'rh_FFJ3', 'rh_FFJ0'] + _FOREARM_JOINTS,
+    _WRIST_JOINTS + ['rh_MFJ4', 'rh_MFJ3', 'rh_MFJ0'] + _FOREARM_JOINTS,
+    _WRIST_JOINTS + ['rh_RFJ4', 'rh_RFJ3', 'rh_RFJ0'] + _FOREARM_JOINTS,
+    _WRIST_JOINTS + ['rh_LFJ5', 'rh_LFJ4', 'rh_LFJ3', 'rh_LFJ0'] + _FOREARM_JOINTS,
+]
 
 _FULL_JOINTS = [
     _WRIST_JOINTS + ['rh_THJ5', 'rh_THJ4', 'rh_THJ3', 'rh_THJ2', 'rh_THJ1'] + _FOREARM_JOINTS,
@@ -209,27 +209,9 @@ class PianoWithOneShadowHand(base.PianoTask):
                 midi = var(initial_value=midi, random_state=random_state)
             self._reset_trajectory(midi)
 
-    # def _reset_trajectory(self, midi: midi_file.MidiFile) -> None:
-    #     print(f"MIDI file notes: {midi.seq.notes}")
-    #     midi_duration = midi.seq.notes[-1].end_time if midi.seq.notes else 0
-    #     print(f"MIDI duration: {midi_duration} seconds")
-    #     num_steps = int(midi_duration / self.control_timestep) + 1
-    #     print(f"Control timestep: {self.control_timestep}, Number of timesteps: {num_steps}")
-    #     self._notes = [[] for _ in range(num_steps)]
-    #     for note in midi.seq.notes:
-    #         t = int(note.start_time / self.control_timestep)
-    #         print(f"Note: {note}, Start time: {note.start_time}, Timestep: {t}")
-    #         self._notes[t].append(note)
-    #     self._sustain_events = []
-    #     if hasattr(midi.seq, "events"):
-    #         for event in midi.seq.events:
-    #             if hasattr(event, "type") and event.type == "control_change" and event.control == 64:
-    #                 t = int(event.time / self.control_timestep)
-    #                 self._sustain_events.append((t, event.value / 127.0))
-    #     print(f"Notes per timestep: {self._notes}")
-
     def _reset_trajectory(self, midi: midi_file.MidiFile) -> None:
-        print(f"MIDI file notes: {midi.seq.notes}")
+        print(f"MIDI file notes: {midi}")
+        # return
         midi_duration = midi.seq.notes[-1].end_time if midi.seq.notes else 0
         print(f"MIDI duration: {midi_duration} seconds")
         total_duration = midi_duration + self._initial_buffer_time
@@ -395,14 +377,18 @@ class PianoWithOneShadowHand(base.PianoTask):
             # print(f"Finger {finger}: Distance to target: {np.linalg.norm(achieved_fingertip_pos - press_pos)}")
             # physics.data.qpos[:] = original_qpos
             # mujoco.mj_forward(physics.model.ptr, physics.data.ptr)
-
+        
             goal_qpos = np.zeros(len(self._finger_joints[finger]))
+            joint_inds = []
             for i, joint_name in enumerate(self._finger_joints[finger]):
                 if "J0" in joint_name:
                     joint_idx = physics.model.name2id(joint_name, "tendon")
                 else:
                     joint_idx = physics.model.name2id(joint_name, "joint")
-                goal_qpos[i] = physics.data.qpos[joint_idx]
+                joint_inds.append(joint_idx)
+                # goal_qpos[i] = physics.data.qpos[joint_idx]
+                # goal_qpos[i] = ik_result.qpos[joint_idx]
+            goal_qpos = ik_result.qpos[joint_inds]
         
         print(f"Finger {finger} goal qpos: {goal_qpos}")
 
@@ -477,6 +463,19 @@ class PianoWithOneShadowHand(base.PianoTask):
                 smooth_path.append(q)
 
         print(f"RRT planning took {time.time() - start_time:.2f} seconds")
+        original_qpos = physics.data.qpos.copy()
+        final_qpos = smooth_path[-1] if smooth_path else start_qpos
+        for i, joint_name in enumerate(self._finger_joints[finger]):
+            if "J0" in joint_name:
+                joint_idx = physics.model.name2id(joint_name, "tendon")
+            else:
+                joint_idx = physics.model.name2id(joint_name, "joint")
+            physics.data.qpos[joint_idx] = final_qpos[i]
+        mujoco.mj_forward(physics.model.ptr, physics.data.ptr)
+        fingertip_site = self._hand.fingertip_sites[finger]
+        full_site_name = f"rh_shadow_hand/{fingertip_site.name}" if self._hand_side == HandSide.RIGHT else f"lh_shadow_hand/{fingertip_site.name}"
+        final_fingertip_pos = physics.named.data.site_xpos[full_site_name].copy()
+        distance_to_target = np.linalg.norm(final_fingertip_pos - press_pos)
         physics.data.qpos[:] = original_qpos
         mujoco.mj_forward(physics.model.ptr, physics.data.ptr)
         return smooth_path
@@ -636,14 +635,33 @@ class PianoWithOneShadowHand(base.PianoTask):
         # Step 3: Handle thumb-under adjustment (optional refinement)
         thumb_assigned = any(finger == 0 for _, finger in self._keys_current)
         if self._thumb_under and thumb_assigned:
+
+            # Find the key assigned to the thumb
+            thumb_key = next(key for key, finger in self._keys_current if finger == 0)
+            print(f"Thumb assigned to key: {thumb_key}")
+
+            key_site = self.piano.keys[thumb_key].site[0]
+            target_key_pos = physics.bind(key_site).xpos.copy()
+
+
             print("Thumb-under detected: Fine-tuning wrist position...")
             forearm_site = self._hand.mjcf_model.find("site", "forearm_tx_site")
             full_forearm_site = f"rh_shadow_hand/{forearm_site.name}"
             forearm_pos = physics.named.data.site_xpos[full_forearm_site]
 
-            target_forearm_pos = forearm_pos.copy()
+            # compute the target forearm position to align the hand with the thumb's key
+            thumb_site = self._hand.fingertip_sites[0]
+            full_thumb_site = f"rh_shadow_hand/{thumb_site.name}" if self._hand_side == HandSide.RIGHT else f"lh_shadow_hand/{thumb_site.name}"
+            current_thumb_pos = physics.named.data.site_xpos[full_thumb_site]
+            forearm_to_thumb_offset = current_thumb_pos - current_forearm_pos
+            print(f"Forearm to thumb offset: {forearm_to_thumb_offset}")
+
+            # Compute the target forearm position
+            # The forearm should move so that the thumb's fingertip aligns with the key
+            # target_forearm_pos = forearm_pos.copy()
+            target_forearm_pos = target_key_pos - forearm_to_thumb_offset
             target_forearm_pos[0] -= 0.05  # Small lateral shift for thumb-under
-            target_forearm_pos[2] += 0.01
+            target_forearm_pos[2] += 0.05
 
             ik_result = qpos_from_site_pose(
                 physics,
@@ -663,8 +681,46 @@ class PianoWithOneShadowHand(base.PianoTask):
                     joint_idx = physics.model.name2id(joint_name, "joint")
                     physics.data.qpos[joint_idx] = ik_result.qpos[joint_idx]
                 mujoco.mj_forward(physics.model.ptr, physics.data.ptr)
+
+                # Replan the thumb's trajectory to ensure it reaches the key
+                self._trajectories[0] = self._plan_with_rrt(thumb_key, 0, physics)
+                self._traj_steps[0] = 0
+                self._last_planned_keys[0] = thumb_key
+                print(f"Thumb-under IK successful, replanned thumb trajectory")
             else:
                 print("Thumb-under IK failed, skipping adjustment")
+
+                # Fallback: Project the forearm position toward the target
+                direction = target_forearm_pos - current_forearm_pos
+                distance = np.linalg.norm(direction)
+                if distance > 1e-6:
+                    direction /= distance
+                    step_size = min(0.05, distance)
+                    intermediate_pos = current_forearm_pos + step_size * direction
+                    ik_result = qpos_from_site_pose(
+                        physics,
+                        full_forearm_site,
+                        intermediate_pos,
+                        None,
+                        self._full_joints_one_array,
+                        tol=1e-2,
+                        max_steps=200,
+                        regularization_threshold=0.01,
+                        regularization_strength=0.1,
+                    )
+                    if ik_result.success:
+                        print(f"Fallback IK successful, intermediate forearm pos: {intermediate_pos}")
+                        for joint_name in self._wrist_joints + self._forearm_joints:
+                            joint_idx = physics.model.name2id(joint_name, "joint")
+                            physics.data.qpos[joint_idx] = ik_result.qpos[joint_idx]
+                        mujoco.mj_forward(physics.model.ptr, physics.data.ptr)
+
+                        # Replan the thumb's trajectory to ensure it reaches the key
+                        self._trajectories[0] = self._plan_with_rrt(thumb_key, 0, physics)
+                        self._traj_steps[0] = 0
+                        self._last_planned_keys[0] = thumb_key
+                    else:
+                        print("Fallback IK failed, skipping adjustment")
 
         # Step 4: Generate finger trajectories
         for key, mjcf_fingering in self._keys_current:

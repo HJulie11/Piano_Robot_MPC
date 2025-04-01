@@ -13,6 +13,8 @@ from absl import app, flags
 import mujoco
 import dm_env
 
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D  # Required for 3D plotting
 from dm_control import composer, mjcf
 from dm_control.mjcf import export_with_assets
 from dm_control.utils.inverse_kinematics import qpos_from_site_pose
@@ -23,16 +25,13 @@ import xml.etree.ElementTree as ET
 
 import mido
 
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-
 from robopianist.music.midi_file import MidiFile
 import robopianist
 import robopianist.models.hands as shadow_hand
 import robopianist.music as music
 # from robopianist.suite.tasks import piano_with_one_shadow_hand
 # from robopianist.suite.tasks.piano_with_one_shadow_hand import PianoWithOneShadowHand
-import robopianist.suite.tasks.piano_with_one_shadow_hand_only_mp as piano_with_one_shadow_hand
+import robopianist.suite.tasks.piano_with_one_shadow_hand_with_dynamics as piano_with_one_shadow_hand
 from robopianist.models.piano import piano_constants as piano_consts
 from robopianist import viewer, suite
 from robopianist.wrappers.evaluation import MidiEvaluationWrapper
@@ -175,120 +174,144 @@ def main(_) -> None:
             initial_buffer_time=0.5,
         ),
     )
-    wrapped_env = MidiEvaluationWrapper(env)
+    # Run 1 trial for trajectory plotting (can extend to multiple trials)
+    num_trials = 1  # Set to 1 for simplicity; adjust as needed
+    collision_rates = []
+    execution_times = []
+    success_rates = []
 
-    task = env.task
-    env.reset()
-    print(env.task.midi)
-    trajectory = task.get_action_trajectory(env.physics)
+    # Lists to store fingertip trajectories for thumb (0), index (1), and middle (2)
+    fingers_to_plot = [0, 1, 2]  # Thumb, index, middle
+    fingertip_trajectories = {finger: {'x': [], 'y': [], 'z': []} for finger in fingers_to_plot}
 
-    actions = trajectory
-    print(f"Action sequence shape: {len(actions)}")
-    print(f"Trajectory: {actions}")
+    for trial in range(num_trials):
+        print(f"Starting trial {trial + 1}/{num_trials}")
+        env.reset()
+        trajectory, _ = env.task.get_action_trajectory(env.physics)  # MP Only (no dynamics or PD)
+        total_steps = len(trajectory)
+        collisions = 0
+        successes = 0
+        start_time = env.physics.data.time
 
-    action_spec = wrapped_env.action_spec()
-    zeros = np.zeros(action_spec.shape, dtype=action_spec.dtype)
-    zeros[-1] = -1.0  # Disable sustain pedal.
+        for t in range(total_steps):
+            action = trajectory[t]
+            print(f"Timestep {t}: Action = {action}")
+            env.physics.set_control(action[:-1])
+            env.physics.step()
+            mujoco.mj_forward(env.physics.model.ptr, env.physics.data.ptr)
 
-    if _EXPORT.value:
-        export_with_assets(
-            env.task.root_entity.mjcf_model,
-            out_dir="/tmp/robopianist/piano_with_one_shadow_hand",
-            out_file_name="scene.xml",
-        )
-        mujoco_viewer.launch_from_path(
-            "/tmp/robopianist/piano_with_one_shadow_hand/scene.xml"
-        )
-        return
+            # Debug: Log the state of _keys_current and _active_notes
+            # print(f"Timestep {t}: _keys_current = {env.task._keys_current}, _active_notes = {env.task._active_notes}")
 
-    if _RECORD.value:
-        wrapped_env = robopianist.wrappers.PianoSoundVideoWrapper(wrapped_env, record_every=1)
-    if _CANONICALIZE.value:
-        wrapped_env = CanonicalSpecWrapper(wrapped_env)
+            # Record fingertip positions for thumb, index, and middle fingers
+            for finger in fingers_to_plot:
+                fingertip_site = env.task._hand.fingertip_sites[finger]
+                full_site_name = f"rh_shadow_hand/{fingertip_site.name}"
+                fingertip_pos = env.physics.named.data.site_xpos[full_site_name].copy()
+                fingertip_trajectories[finger]['x'].append(fingertip_pos[0])  # x-coordinate
+                fingertip_trajectories[finger]['y'].append(fingertip_pos[1])  # y-coordinate
+                fingertip_trajectories[finger]['z'].append(fingertip_pos[2])  # z-coordinate
 
-    class ActionSequencePlayer:
-        def __init__(self) -> None:
-            self.reset()
+            # Check collisions
+            for finger1 in range(5):
+                for finger2 in range(finger1 + 1, 5):
+                    if env.task._check_collision(env.physics, finger1, env.physics.data.qpos) or \
+                    env.task._check_collision(env.physics, finger2, env.physics.data.qpos):
+                        collisions += 1
 
-        def reset(self) -> None:
-            if _ACTION_SEQUENCE.value is not None:
-                self._idx = 0
-                self._actions = np.array(actions)
-                print(f"Loaded action sequence with shape {self._actions.shape}")
+            # Check success for assigned keys
+            if env.task._keys_current:  # Only proceed if there are active keys
+                for key, finger in env.task._keys_current:
+                    fingertip_site = env.task._hand.fingertip_sites[finger]
+                    full_site_name = f"rh_shadow_hand/{fingertip_site.name}"
+                    site_idx = env.physics.model.name2id(full_site_name, "site")
+                    contact_force = env.physics.data.cfrc_ext[site_idx][2]  # z-component
+                    if contact_force > 0.5:
+                        successes += 1
             else:
-                self._idx = 0
-                self._actions = np.zeros(22)
+                print(f"Timestep {t}: No active keys to evaluate")
 
-        def __call__(self, timestep):
-            if self._idx < len(self._actions):
-                action = self._actions[self._idx]
-                self._idx += 1
-                # print(f"Step {self._idx}: Action: {action}")
-                # print(f"action shape: {action.shape}")
-                return action
-            else:
-                print(f"Step {self._idx}: Reached end of action sequence, repeating last action")
-                return self._actions[-1]
+        # Compute metrics
+        collision_rates.append(collisions / total_steps * 100 if total_steps > 0 else 0.0)
+        execution_times.append(env.physics.data.time - start_time)
 
-    policy = ActionSequencePlayer()
+        # Compute success rate, handle empty _keys_current
+        if env.task._keys_current:
+            success_rate = successes / len(env.task._keys_current) * 100
+        else:
+            success_rate = 0.0  # Default to 0% if no keys were active
+            print(f"Trial {trial + 1}: No active keys at the end of the trial, setting success rate to 0%")
+        success_rates.append(success_rate)
 
-    print("Running policy ...")
-    timestep = wrapped_env.reset()
-    step_count = 0
+    # Plot fingertip trajectories in 3D for thumb, index, and middle fingers
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111, projection='3d')
+    fig.suptitle("3D Fingertip Trajectories (Thumb, Index, Middle Fingers) - MP Only")
 
-    # List to store the fingertip trajectories
-    thumb_trajectory = []
-    index_trajectory = []
-    middle_trajectory = []
+    # Labels for fingers
+    finger_labels = {0: "Thumb", 1: "Index", 2: "Middle"}
 
-    if _HEADLESS.value:
-        print("Running headless ...")
-        viewer.launch(wrapped_env, policy=policy)
-    else:
-        print("Running with viewer ...")
-        with mujoco_viewer.launch_passive(
-            wrapped_env.physics.model.ptr, wrapped_env.physics.data.ptr
-        ) as mujoco_viewer_handle:
-            while mujoco_viewer_handle.is_running() and not timestep.last():
-                action = policy(timestep)
-                try:
-                    timestep = wrapped_env.step(action)
-                    step_count += 1
-                    mujoco_viewer_handle.sync()
+    # Use Matplotlib's tab10 palette for colorblind-friendly colors
+    colors = plt.cm.tab10(np.linspace(0, 1, 10))  # Get the first 10 colors from tab10
+    finger_colors = {0: colors[0], 1: colors[1], 2: colors[2]}  # Assign to thumb, index, middle
 
-                    # extract fingertip positions
-                    thumb_pos = env.physics.bind(env.task._hand.fingertip_sites[0]).xpos.copy()
-                    index_pos = env.physics.bind(env.task._hand.fingertip_sites[1]).xpos.copy()
-                    middle_pos = env.physics.bind(env.task._hand.fingertip_sites[2]).xpos.copy()
-                    # thumb_pos = env.physics.named.data.site_xpos["rh_shadow_hand/thdistal_site"].copy()
-                    # index_pos = env.physics.named.data.site_xpos["rh_shadow_hand/ffdistal_site"].copy()
-                    # middle_pos = env.physics.named.data.site_xpos["rh_shadow_hand/ffdistal_site"].copy()
+    # Define different line styles for additional distinction
+    line_styles = {0: '-', 1: '-', 2: '-'}  # Solid, dashed, dotted
 
-                    # Append to trajectory lists
-                    thumb_trajectory.append(thumb_pos)
-                    index_trajectory.append(index_pos)
-                    middle_trajectory.append(middle_pos)
+    # Plot trajectories
+    for finger in fingers_to_plot:
+        x = fingertip_trajectories[finger]['x']
+        y = fingertip_trajectories[finger]['y']
+        z = fingertip_trajectories[finger]['z']
+        ax.plot(x, y, z, label=finger_labels[finger], color=finger_colors[finger],
+                linestyle=line_styles[finger], linewidth=2)
+        # Add scatter points for start and end
+        ax.scatter(x[0], y[0], z[0], color=finger_colors[finger], marker='o', s=50)  # Start point
+        ax.scatter(x[-1], y[-1], z[-1], color=finger_colors[finger], marker='x', s=50)  # End point
 
-                    print(f"Step {step_count}: Reward: {timestep.reward}")
-                    time.sleep(_CONTROL_TIMESTEP.value)
-                except Exception as e:
-                    print(f"Error during step: {e}")
-                    break
-            print(f"Episode completed in {step_count} steps or viewer closed")
+    # Set labels and title
+    ax.set_xlabel("X Position (m)")
+    ax.set_ylabel("Y Position (m)")
+    ax.set_zlabel("Z Position (m)")
+    ax.legend()
+    ax.grid(True)
 
-    # Convert to numpy arrays for easier plotting
-    thumb_trajectory = np.array(thumb_trajectory)
-    index_trajectory = np.array(index_trajectory)
-    middle_trajectory = np.array(middle_trajectory)
+    # Set axis limits to focus on the relevant region
+    ax.set_xlim([min([min(fingertip_trajectories[finger]['x']) for finger in fingers_to_plot]) - 0.01,
+                max([max(fingertip_trajectories[finger]['x']) for finger in fingers_to_plot]) + 0.01])
+    ax.set_ylim([min([min(fingertip_trajectories[finger]['y']) for finger in fingers_to_plot]) - 0.01,
+                max([max(fingertip_trajectories[finger]['y']) for finger in fingers_to_plot]) + 0.01])
+    ax.set_zlim([min([min(fingertip_trajectories[finger]['z']) for finger in fingers_to_plot]) - 0.01,
+                max([max(fingertip_trajectories[finger]['z']) for finger in fingers_to_plot]) + 0.01])
 
-    np.save("results/trajectories/thumb_trajectory.npy", thumb_trajectory)
-    np.save("results/trajectories/index_trajectory.npy", index_trajectory)
-    np.save("results/trajectories/middle_trajectory.npy", middle_trajectory)
+    plt.savefig("results/trajectories/fingertip_trajectories_dynamics_predefined.png")
+    plt.show()
 
-    wrapped_env.save_timestep_rewards(_TIMESTEP_REWARDS_PATH.value)
-    wrapped_env.save_timestep_energy_rewards(_TIMESTEP_ENERGY_REWARDS_PATH.value)
-    wrapped_env.save_timestep_finger_movement_rewards(_TIMESTEP_FINGER_MOVEMENT_REWARDS_PATH.value)
-    wrapped_env.save_timestep_key_press_rewards(_TIMESTEP_KEY_PRESS_REWARDS_PATH.value)
+    # Plot remaining metrics (collision rate, execution time, success rate)
+    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+    fig.suptitle("MP Only Experiment Results (Other Metrics)")
+
+    # Collision Rate
+    axes[0].bar(range(num_trials), collision_rates)
+    axes[0].set_title("Collision Rate (%)")
+    axes[0].set_xlabel("Trial")
+    axes[0].set_ylabel("Collision Rate (%)")
+
+    # Execution Time
+    axes[1].bar(range(num_trials), execution_times)
+    axes[1].set_title("Execution Time (s)")
+    axes[1].set_xlabel("Trial")
+    axes[1].set_ylabel("Time (s)")
+
+    # Success Rate
+    axes[2].bar(range(num_trials), success_rates)
+    axes[2].set_title("Success Rate (%)")
+    axes[2].set_xlabel("Trial")
+    axes[2].set_ylabel("Success Rate (%)")
+
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.savefig("mp_only_other_metrics.png")
+    plt.show()
 
 if __name__ == "__main__":
     app.run(main)

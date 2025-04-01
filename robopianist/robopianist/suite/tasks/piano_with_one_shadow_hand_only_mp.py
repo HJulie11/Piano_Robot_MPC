@@ -41,17 +41,18 @@ _ENERGY_PENALTY_COEF = 5e-3
 
 _NUM_STEPS_PER_SEGMENT = 10
 
-_FINGER_JOINTS = [
-    ['rh_THJ5', 'rh_THJ4', 'rh_THJ3', 'rh_THJ2', 'rh_THJ1'],
-    ['rh_FFJ4', 'rh_FFJ3', 'rh_FFJ0'],
-    ['rh_MFJ4', 'rh_MFJ3', 'rh_MFJ0'],
-    ['rh_RFJ4', 'rh_RFJ3', 'rh_RFJ0'],
-    ['rh_LFJ5', 'rh_LFJ4', 'rh_LFJ3', 'rh_LFJ0'],
-]
 
 _WRIST_JOINTS = ['rh_WRJ2', 'rh_WRJ1']
 
 _FOREARM_JOINTS = ['forearm_tx', 'forearm_ty']
+
+_FINGER_JOINTS = [
+    _WRIST_JOINTS + ['rh_THJ5', 'rh_THJ4', 'rh_THJ3', 'rh_THJ2', 'rh_THJ1'] + _FOREARM_JOINTS,
+    _WRIST_JOINTS + ['rh_FFJ4', 'rh_FFJ3', 'rh_FFJ0'] + _FOREARM_JOINTS,
+    _WRIST_JOINTS + ['rh_MFJ4', 'rh_MFJ3', 'rh_MFJ0'] + _FOREARM_JOINTS,
+    _WRIST_JOINTS + ['rh_RFJ4', 'rh_RFJ3', 'rh_RFJ0'] + _FOREARM_JOINTS,
+    _WRIST_JOINTS + ['rh_LFJ5', 'rh_LFJ4', 'rh_LFJ3', 'rh_LFJ0'] + _FOREARM_JOINTS,
+]
 
 _FULL_JOINTS = [
     _WRIST_JOINTS + ['rh_THJ5', 'rh_THJ4', 'rh_THJ3', 'rh_THJ2', 'rh_THJ1'] + _FOREARM_JOINTS,
@@ -398,12 +399,15 @@ class PianoWithOneShadowHand(base.PianoTask):
             # mujoco.mj_forward(physics.model.ptr, physics.data.ptr)
 
             goal_qpos = np.zeros(len(self._finger_joints[finger]))
+            joint_inds = []
             for i, joint_name in enumerate(self._finger_joints[finger]):
                 if "J0" in joint_name:
                     joint_idx = physics.model.name2id(joint_name, "tendon")
                 else:
                     joint_idx = physics.model.name2id(joint_name, "joint")
-                goal_qpos[i] = physics.data.qpos[joint_idx]
+                # goal_qpos[i] = physics.data.qpos[joint_idx]
+                joint_inds.append(joint_idx)
+            goal_qpos = ik_result.qpos[joint_inds]
         
         print(f"Finger {finger} goal qpos: {goal_qpos}")
 

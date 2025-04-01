@@ -233,6 +233,11 @@ def main(_) -> None:
     timestep = wrapped_env.reset()
     step_count = 0
 
+    # List to store the fingertip trajectories
+    thumb_trajectory = []
+    index_trajectory = []
+    middle_trajectory = []
+
     if _HEADLESS.value:
         print("Running headless ...")
         viewer.launch(wrapped_env, policy=policy)
@@ -247,6 +252,20 @@ def main(_) -> None:
                     timestep = wrapped_env.step(action)
                     step_count += 1
                     mujoco_viewer_handle.sync()
+
+                    # extract fingertip positions
+                    thumb_pos = env.physics.bind(env.task._hand.fingertip_sites[0]).xpos.copy()
+                    index_pos = env.physics.bind(env.task._hand.fingertip_sites[1]).xpos.copy()
+                    middle_pos = env.physics.bind(env.task._hand.fingertip_sites[2]).xpos.copy()
+                    # thumb_pos = env.physics.named.data.site_xpos["rh_shadow_hand/thdistal_site"].copy()
+                    # index_pos = env.physics.named.data.site_xpos["rh_shadow_hand/ffdistal_site"].copy()
+                    # middle_pos = env.physics.named.data.site_xpos["rh_shadow_hand/ffdistal_site"].copy()
+
+                    # Append to trajectory lists
+                    thumb_trajectory.append(thumb_pos)
+                    index_trajectory.append(index_pos)
+                    middle_trajectory.append(middle_pos)
+
                     print(f"Step {step_count}: Reward: {timestep.reward}")
                     time.sleep(_CONTROL_TIMESTEP.value)
                 except Exception as e:
@@ -254,18 +273,27 @@ def main(_) -> None:
                     break
             print(f"Episode completed in {step_count} steps or viewer closed")
 
+    # Convert to numpy arrays for easier plotting
+    thumb_trajectory = np.array(thumb_trajectory)
+    index_trajectory = np.array(index_trajectory)
+    middle_trajectory = np.array(middle_trajectory)
+
+    np.save("results/trajectories/thumb_trajectory.npy", thumb_trajectory)
+    np.save("results/trajectories/index_trajectory.npy", index_trajectory)
+    np.save("results/trajectories/middle_trajectory.npy", middle_trajectory)
+
     wrapped_env.save_timestep_rewards(_TIMESTEP_REWARDS_PATH.value)
     wrapped_env.save_timestep_energy_rewards(_TIMESTEP_ENERGY_REWARDS_PATH.value)
     wrapped_env.save_timestep_finger_movement_rewards(_TIMESTEP_FINGER_MOVEMENT_REWARDS_PATH.value)
     wrapped_env.save_timestep_key_press_rewards(_TIMESTEP_KEY_PRESS_REWARDS_PATH.value)
 
-    import matplotlib.pyplot as plt
-    plt.plot(all_dynamics_data["energy"])
-    plt.xlabel("Timestep")
-    plt.ylabel("Energy")
-    plt.title("Energy Over Time")
-    plt.grid()
-    plt.show()
+    # import matplotlib.pyplot as plt
+    # plt.plot(all_dynamics_data["energy"])
+    # plt.xlabel("Timestep")
+    # plt.ylabel("Energy")
+    # plt.title("Energy Over Time")
+    # plt.grid()
+    # plt.show()
 
 if __name__ == "__main__":
     app.run(main)

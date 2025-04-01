@@ -41,17 +41,17 @@ _ENERGY_PENALTY_COEF = 5e-3
 
 _NUM_STEPS_PER_SEGMENT = 10
 
-_FINGER_JOINTS = [
-    ['rh_THJ5', 'rh_THJ4', 'rh_THJ3', 'rh_THJ2', 'rh_THJ1'],
-    ['rh_FFJ4', 'rh_FFJ3', 'rh_FFJ0'],
-    ['rh_MFJ4', 'rh_MFJ3', 'rh_MFJ0'],
-    ['rh_RFJ4', 'rh_RFJ3', 'rh_RFJ0'],
-    ['rh_LFJ5', 'rh_LFJ4', 'rh_LFJ3', 'rh_LFJ0'],
-]
-
 _WRIST_JOINTS = ['rh_WRJ2', 'rh_WRJ1']
 
 _FOREARM_JOINTS = ['forearm_tx', 'forearm_ty']
+
+_FINGER_JOINTS = [
+    _WRIST_JOINTS + ['rh_THJ5', 'rh_THJ4', 'rh_THJ3', 'rh_THJ2', 'rh_THJ1'] + _FOREARM_JOINTS,
+    _WRIST_JOINTS + ['rh_FFJ4', 'rh_FFJ3', 'rh_FFJ0'] + _FOREARM_JOINTS,
+    _WRIST_JOINTS + ['rh_MFJ4', 'rh_MFJ3', 'rh_MFJ0'] + _FOREARM_JOINTS,
+    _WRIST_JOINTS + ['rh_RFJ4', 'rh_RFJ3', 'rh_RFJ0'] + _FOREARM_JOINTS,
+    _WRIST_JOINTS + ['rh_LFJ5', 'rh_LFJ4', 'rh_LFJ3', 'rh_LFJ0'] + _FOREARM_JOINTS,
+]
 
 _FULL_JOINTS = [
     _WRIST_JOINTS + ['rh_THJ5', 'rh_THJ4', 'rh_THJ3', 'rh_THJ2', 'rh_THJ1'] + _FOREARM_JOINTS,
