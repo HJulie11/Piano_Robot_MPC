@@ -145,14 +145,57 @@ def create_simple_midi_file(path: Path) -> None:
 
     mid.save(str(path))
 
+from midiutil import MIDIFile
+
+def create_midi_file(path: Path) -> None:
+
+    # Create a MIDI file with one track
+    midi = MIDIFile(1)
+    track = 0
+    time = 0  # Start at the beginning
+    midi.addTrackName(track, time, "Twinkle Twinkle")
+    midi.addTempo(track, time, 120)
+
+    # Define the melody (Twinkle Twinkle Little Star) with different velocities
+    # Format: (pitch, time, duration, velocity)
+    notes = [
+        (60, 0, 1, 100),  # C
+        (60, 1, 2, 80),   # C
+        (67, 2, 3, 100),  # G
+        (67, 3, 4, 80),   # G
+        (69, 4, 5, 100),  # A
+        (69, 5, 7, 80),   # A
+        (67, 7, 8, 100),  # G (held)
+        (65, 8, 9, 90),   # F
+        (65, 9, 10, 70),   # F
+        (64, 10, 11, 90),  # E
+        (64, 11, 12, 70),  # E
+        (62, 12, 13, 90),  # D
+        (62, 13, 14, 70),  # D
+        (60, 14, 16, 100), # C (held)
+    ]
+
+    # Add notes to the MIDI file
+    for note in notes:
+        pitch, start_time, end_time, velocity = note
+        midi.addNote(track, 0, pitch, start_time, end_time, velocity)
+
+    # Save the MIDI file
+    with open(path, "wb") as midi_file:
+        midi.writeFile(midi_file)
+
+    print("MIDI file generated: twinkle_twinkle_velocity.mid")
+
 def main(_) -> None:
     # Create a test MIDI file
     test_midi_path = Path("test_twinkle.mid")
-    create_simple_midi_file(test_midi_path)
+    # create_simple_midi_file(test_midi_path)
+    create_midi_file(test_midi_path)
 
     env = load(
         environment_name=_ENV_NAME.value,
         midi_file=test_midi_path,
+        # midi_file="robopianist/music/data/rousseau/twinkle-twinkle-trimmed.mid",
         shift=_SHIFT.value,
         task_kwargs=dict(
             change_color_on_activation=True,
@@ -175,7 +218,8 @@ def main(_) -> None:
 
     task = env.task
     env.reset()
-    print(env.task.midi)
+    # print(env.task.midi.seq.notes)
+    # return
     trajectory = task.get_action_trajectory(env.physics)
 
     actions = trajectory
@@ -280,6 +324,7 @@ def main(_) -> None:
     np.save("results/trajectories/thumb_trajectory.npy", thumb_trajectory)
     np.save("results/trajectories/index_trajectory.npy", index_trajectory)
     np.save("results/trajectories/middle_trajectory.npy", middle_trajectory)
+    np.save("results/trajectoriee/trajectory_predefined.npy", actions)
 
     wrapped_env.save_timestep_rewards(_TIMESTEP_REWARDS_PATH.value)
     wrapped_env.save_timestep_energy_rewards(_TIMESTEP_ENERGY_REWARDS_PATH.value)

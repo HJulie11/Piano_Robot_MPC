@@ -531,9 +531,10 @@ class PianoWithOneShadowHand(base.PianoTask):
                 print(f"Target hand position: {target_hand_pos}")
 
                 # Step 2: Adjust forearm/wrist position using IK
-                forearm_site = self._hand.mjcf_model.find("site", "forearm_tx_site")
+                forearm_site = self._hand.mjcf_model.find("site", "forearm_ty_site")
                 full_forearm_site = f"rh_shadow_hand/{forearm_site.name}"
-                current_forearm_pos = physics.named.data.site_xpos[full_forearm_site]
+                # current_forearm_pos = physics.named.data.site_xpos[full_forearm_site]
+                current_forearm_pos = physics.bind(forearm_site).xpos.copy()
                 print(f"Current forearm position: {current_forearm_pos}")
 
                 ik_result = qpos_from_site_pose(
@@ -563,7 +564,8 @@ class PianoWithOneShadowHand(base.PianoTask):
             print("Thumb-under detected: Fine-tuning wrist position...")
             forearm_site = self._hand.mjcf_model.find("site", "forearm_tx_site")
             full_forearm_site = f"rh_shadow_hand/{forearm_site.name}"
-            forearm_pos = physics.named.data.site_xpos[full_forearm_site]
+            # forearm_pos = physics.named.data.site_xpos[full_forearm_site]
+            forearm_pos = physics.bind(forearm_site).xpos.copy()
 
             target_forearm_pos = forearm_pos.copy()
             target_forearm_pos[0] -= 0.05  # Small lateral shift for thumb-under
@@ -574,7 +576,7 @@ class PianoWithOneShadowHand(base.PianoTask):
                 full_forearm_site,
                 target_forearm_pos,
                 None,
-                self._full_joints_one_array,
+                self._full_joints_one_array[finger][:-2],
                 tol=1e-2,
                 max_steps=200,
                 regularization_threshold=0.01,
@@ -646,7 +648,7 @@ class PianoWithOneShadowHand(base.PianoTask):
 
                         # Velocity-based control: Adjust action to achieve desired velocity
                         # Use a PD controller with velocity term
-                        kp = 50.0  # Position gain
+                        kp = 100.0  # Position gain
                         kv = 10.0  # Velocity gain
                         vel_error = desired_velocity - current_qvel
                         control_effort = kp * pos_error + kv * vel_error
@@ -677,7 +679,8 @@ class PianoWithOneShadowHand(base.PianoTask):
         for finger in range(5):
             site_name = self._hand.fingertip_sites[finger].name
             full_site_name = f"rh_shadow_hand/{site_name}" if self._hand_side == HandSide.RIGHT else f"lh_shadow_hand/{site_name}"
-            fingertip_pos = physics.named.data.site_xpos[full_site_name]
+            # fingertip_pos = physics.named.data.site_xpos[full_site_name]
+            fingertip_pos = physics.bind(self._hand.fingertip_sites[finger]).xpos.copy()
             # Compute the site's linear velocity using the Jacobian
             site_idx = physics.model.name2id(full_site_name, "site")
             nq = physics.model.nq
@@ -1032,5 +1035,5 @@ class PianoWithOneShadowHand(base.PianoTask):
             if not self.piano.activation[key]:
                 physics.bind(key_geom).rgba = tuple(fingertip_site.rgba[:3]) + (1.0,)
 
-    def get_action(self, physics):
-        return self._update_hand_position(physics)
+    # def get_action(self, physics):
+    #     return self._update_hand_position(physics)

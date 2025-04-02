@@ -246,7 +246,7 @@ def main(_) -> None:
     # Plot fingertip trajectories in 3D for thumb, index, and middle fingers
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection='3d')
-    fig.suptitle("3D Fingertip Trajectories (Thumb, Index, Middle Fingers) - MP Only")
+    fig.suptitle("3D Fingertip Trajectories (Thumb, Index, Middle Fingers)")
 
     # Labels for fingers
     finger_labels = {0: "Thumb", 1: "Index", 2: "Middle"}

@@ -149,7 +149,7 @@ def create_simple_midi_file(path: Path) -> None:
 def main(_) -> None:
     # Create a test MIDI file
     test_midi_path = Path("test_twinkle.mid")
-    create_simple_midi_file(test_midi_path)
+    # create_simple_midi_file(test_midi_path)
 
     env = load(
         environment_name=_ENV_NAME.value,

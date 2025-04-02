@@ -317,7 +317,9 @@ class PianoWithOneShadowHand(base.PianoTask):
 
         # Get target key position in world frame
         key_site = self.piano.keys[key].site[0]
-        key_pos = physics.bind(key_site).xpos.copy()
+        print(key_site)
+        # key_pos = physics.bind(key_site).xpos.copy()
+        key_pos = self.piano.keys[key].pos
         print(f"Key {key} position: {key_pos}")
 
         # Get key joint range to determine required press depth
@@ -351,12 +353,15 @@ class PianoWithOneShadowHand(base.PianoTask):
         else:
             full_site_name = f"rh_shadow_hand/{site_name}"
 
+        finger_joints = [i for i in self._full_finger_joints[finger] if "forearm" not in i]
+
         ik_result = qpos_from_site_pose(
             physics,
             full_site_name,
-            local_press_pos,
+            press_pos,
             None,
-            self._full_finger_joints[finger], # excluding wrist for now: + self._wrist_joints,
+            # self._full_finger_joints[finger], # excluding wrist for now: + self._wrist_joints,
+            finger_joints,
             tol=1e-2,
             max_steps=200,
             regularization_threshold = 0.01,
@@ -368,6 +373,7 @@ class PianoWithOneShadowHand(base.PianoTask):
         if ik_result.err_norm > 0.2:
             print(f"Finger {finger}: IK failed to converge, err_norm={ik_result.err_norm}")
             print(f"Finger {finger}: Falling back to projection toward goal position")
+            # return
             goal_qpos = self._project_toward_goal(
                 physics,
                 finger,
@@ -491,6 +497,7 @@ class PianoWithOneShadowHand(base.PianoTask):
         current_fingertip_pos = fingertip_pos.copy()
         max_projection_steps = 10
         step_size = 0.005
+        finger_joints = [i for i in self._full_finger_joints[finger] if "forearm" not in i]
 
         for step in range(max_projection_steps):
             direction = target_pos - current_fingertip_pos
@@ -502,6 +509,7 @@ class PianoWithOneShadowHand(base.PianoTask):
             direction = direction / distance
             intermediate_pos = current_fingertip_pos + step_size * direction
             print(f"Finger {finger}: Intermediate position: {intermediate_pos}")
+            # return
 
             fingertip_site = self._hand.fingertip_sites[finger]
             fingertip_xmat = physics.bind(fingertip_site).xmat.copy()
@@ -524,7 +532,8 @@ class PianoWithOneShadowHand(base.PianoTask):
                 full_site_name,
                 local_intermediate_pos,
                 None,
-                self._full_finger_joints[finger], # + self._wrist_joints,
+                # self._full_finger_joints[finger], # + self._wrist_joints,
+                finger_joints,
                 tol=1e-1,
                 max_steps=200,
                 regularization_threshold = 0.01,
@@ -614,7 +623,8 @@ class PianoWithOneShadowHand(base.PianoTask):
                 # Step 2: Adjust forearm/wrist position using IK
                 forearm_site = self._hand.mjcf_model.find("site", "forearm_tx_site")
                 full_forearm_site = f"rh_shadow_hand/{forearm_site.name}"
-                current_forearm_pos = physics.named.data.site_xpos[full_forearm_site]
+                # current_forearm_pos = physics.named.data.site_xpos[full_forearm_site]
+                current_forearm_pos = physics.bind(forearm_site).xpos.copy()
                 print(f"Current forearm position: {current_forearm_pos}")
 
                 ik_result = qpos_from_site_pose(
@@ -644,7 +654,8 @@ class PianoWithOneShadowHand(base.PianoTask):
             print("Thumb-under detected: Fine-tuning wrist position...")
             forearm_site = self._hand.mjcf_model.find("site", "forearm_tx_site")
             full_forearm_site = f"rh_shadow_hand/{forearm_site.name}"
-            forearm_pos = physics.named.data.site_xpos[full_forearm_site]
+            # forearm_pos = physics.named.data.site_xpos[full_forearm_site]
+            forearm_pos = physics.bind(forearm_site).xpos.copy()
 
             target_forearm_pos = forearm_pos.copy()
             target_forearm_pos[0] -= 0.05  # Small lateral shift for thumb-under
@@ -685,7 +696,8 @@ class PianoWithOneShadowHand(base.PianoTask):
         for finger in range(5):
             site_name = self._hand.fingertip_sites[finger].name
             full_site_name = f"rh_shadow_hand/{site_name}" if self._hand_side == HandSide.RIGHT else f"lh_shadow_hand/{site_name}"
-            fingertip_pos = physics.named.data.site_xpos[full_site_name]
+            # fingertip_pos = physics.named.data.site_xpos[full_site_name]
+            fingertip_pos = physics.bind(self._hand.fingertip_sites[finger]).xpos.copy()
             assigned_key = next((key for key, f in self._keys_current if f == finger), None)
             if assigned_key is not None:
                 key_site = self.piano.keys[assigned_key].site[0]

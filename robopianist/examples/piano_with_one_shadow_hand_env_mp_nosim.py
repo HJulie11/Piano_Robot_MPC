@@ -246,7 +246,7 @@ def main(_) -> None:
     # Plot fingertip trajectories in 3D for thumb, index, and middle fingers
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection='3d')
-    fig.suptitle("3D Fingertip Trajectories (Thumb, Index, Middle Fingers) - MP Only")
+    fig.suptitle("3D Fingertip Trajectories (Thumb, Index, Middle Fingers)")
 
     # Labels for fingers
     finger_labels = {0: "Thumb", 1: "Index", 2: "Middle"}
@@ -284,7 +284,7 @@ def main(_) -> None:
     ax.set_zlim([min([min(fingertip_trajectories[finger]['z']) for finger in fingers_to_plot]) - 0.01,
                 max([max(fingertip_trajectories[finger]['z']) for finger in fingers_to_plot]) + 0.01])
 
-    plt.savefig("fingertip_trajectories_3d_mp_only_colorblind.png")
+    plt.savefig("results/trajectories/fingertip_trajectories_3d_mp.png")
     plt.show()
 
     # Plot remaining metrics (collision rate, execution time, success rate)
@@ -312,6 +312,40 @@ def main(_) -> None:
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     plt.savefig("mp_only_other_metrics.png")
     plt.show()
+
+    # Load predefined and executed trajectory data
+    # Replace these with actual data from your simulation
+    # Example: 5 joints over 100 timesteps
+    timesteps = 100
+    num_joints = 5
+
+    # Simulated predefined trajectory (ideal)
+    theta_planned = np.linspace(0, np.pi, timesteps).reshape(-1, 1) * np.ones(num_joints)
+
+    # Simulated executed trajectory (with noise and delays)
+    theta_executed = theta_planned + np.random.normal(0, 0.1, (timesteps, num_joints))
+
+    # Compute trajectory deviation per joint
+    deviation = np.abs(theta_planned - theta_executed)
+    rmse = np.sqrt(np.mean(deviation ** 2, axis=0))  # RMSE per joint
+
+    # Compute DTW similarity for the first joint
+    distance, _ = fastdtw(theta_planned[:, 0], theta_executed[:, 0], dist=euclidean)
+
+    # Visualization
+    plt.figure(figsize=(12, 6))
+    for i in range(num_joints):
+        plt.plot(deviation[:, i], label=f'Joint {i+1}')
+    plt.xlabel("Timestep")
+    plt.ylabel("Deviation (radians)")
+    plt.title("Trajectory Deviation Over Time")
+    plt.legend()
+    plt.grid()
+    plt.show()
+
+    # Print evaluation metrics
+    print("RMSE per Joint:", rmse)
+    print("DTW Distance for Joint 1:", distance)
 
 if __name__ == "__main__":
     app.run(main)

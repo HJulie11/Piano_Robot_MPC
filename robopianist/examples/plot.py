@@ -2,6 +2,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
+# from fastdtw import fastdtw
+# from scipy.spatial.distance import euclidean
 
 # Load the timestep rewards
 df_reward = pd.read_csv("results/timestep_rewards.csv")
@@ -94,3 +96,4 @@ plt.legend()
 plt.grid()
 plt.savefig("results/trajectories/fingertip_trajectories_z_controller_executed.png", format="png", dpi=300)
 plt.show()
+

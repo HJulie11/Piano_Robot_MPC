@@ -236,21 +236,21 @@ class PianoWithOneShadowHand(base.PianoTask):
                         self._sustain_events.append((t, event.value / 127.0))
         print(f"Notes per timestep: {self._notes}")
 
-    def _set_resting_position(self, physics) -> np.ndarray:
-        resting_qpos = np.zeros(physics.data.qpos.shape)
-        for finger in range(5):
-            for joint_name in self._full_finger_joints[finger]:
-                joint_idx = physics.model.name2id(joint_name, "joint")
-                if joint_idx == -1:
-                    joint_idx = physics.model.name2id(joint_name, "tendon")
-                    if joint_idx == -1:
-                        raise ValueError(f"Joint {joint_name} not found")
-                joint_range = physics.model.jnt_range[joint_idx]
-                resting_angle = joint_range[0] + 0.1 * (joint_range[1] - joint_range[0])
-                resting_qpos[joint_idx] = resting_angle
-        physics.data.qpos[:] = resting_qpos
-        mujoco.mj_forward(physics.model.ptr, physics.data.ptr)
-        return resting_qpos
+    # def _set_resting_position(self, physics) -> np.ndarray:
+    #     resting_qpos = np.zeros(physics.data.qpos.shape)
+    #     for finger in range(5):
+    #         for joint_name in self._full_finger_joints[finger]:
+    #             joint_idx = physics.model.name2id(joint_name, "joint")
+    #             if joint_idx == -1:
+    #                 joint_idx = physics.model.name2id(joint_name, "tendon")
+    #                 if joint_idx == -1:
+    #                     raise ValueError(f"Joint {joint_name} not found")
+    #             joint_range = physics.model.jnt_range[joint_idx]
+    #             resting_angle = joint_range[0] + 0.1 * (joint_range[1] - joint_range[0])
+    #             resting_qpos[joint_idx] = resting_angle
+    #     physics.data.qpos[:] = resting_qpos
+    #     mujoco.mj_forward(physics.model.ptr, physics.data.ptr)
+    #     return resting_qpos
 
     def _plan_with_rrt(self, key: int, finger: int, physics) -> List[np.ndarray]:
         import time
@@ -296,6 +296,8 @@ class PianoWithOneShadowHand(base.PianoTask):
         # mujoco.mj_forward(physics.model.ptr, physics.data.ptr)
 
         # Get target key position in world frame
+        print(f"Key {key} site: {self.piano.keys[key].site[0]}")
+        # return
         key_site = self.piano.keys[key].site[0]
         key_pos = physics.bind(key_site).xpos.copy()
         print(f"Key {key} position: {key_pos}")
@@ -312,7 +314,7 @@ class PianoWithOneShadowHand(base.PianoTask):
 
         # Adjust key position for presing
         press_pos = key_pos.copy()
-        press_pos[2] += 0.005
+        press_pos[-1] += 0.005
         print(f"Adjusted press position (just above key): {press_pos}")
 
         # Convert press_pos to the fingertip's local frame
@@ -334,7 +336,7 @@ class PianoWithOneShadowHand(base.PianoTask):
         ik_result = qpos_from_site_pose(
             physics,
             full_site_name,
-            local_press_pos,
+            press_pos,
             None,
             self._full_finger_joints[finger], # excluding wrist for now: + self._wrist_joints,
             tol=1e-2,
@@ -659,9 +661,12 @@ class PianoWithOneShadowHand(base.PianoTask):
             # Compute the target forearm position
             # The forearm should move so that the thumb's fingertip aligns with the key
             # target_forearm_pos = forearm_pos.copy()
-            target_forearm_pos = target_key_pos - forearm_to_thumb_offset
-            target_forearm_pos[0] -= 0.05  # Small lateral shift for thumb-under
-            target_forearm_pos[2] += 0.05
+            # target_forearm_pos = target_key_pos - forearm_to_thumb_offset
+            target_forearm_pos = forearm_pos
+            target_forearm_pos[0] = target_key_pos[0]
+            target_forearm_pos[1] = target_key_pos[1]
+            # target_forearm_pos[0] -= 0.05  # Small lateral shift for thumb-under
+            # target_forearm_pos[2] += 0.05
 
             ik_result = qpos_from_site_pose(
                 physics,
@@ -1188,6 +1193,7 @@ class PianoWithOneShadowHand(base.PianoTask):
             self._t_idx = t
             self._update_fingering_state()
             self._keys_current = self._keys
+            print(f"Keys to press at timestep {t}: {self._keys_current}")
             action, dynamics = self._update_hand_position(physics)
 
             all_dynamics_data["fingertip_velocities"].append(dynamics["fingertip_velocities"])
@@ -1326,7 +1332,7 @@ class PianoWithOneShadowHand(base.PianoTask):
         for _, mjcf_fingering in self._keys:
             self._fingering_state[mjcf_fingering] = 1.0
 
-        # Assign fingers to keys.
+        # # Assign fingers to keys.
         # print(f"notes: {notes}")
         # finger_assignments = self._assign_fingers(notes)
         # for key, finger in finger_assignments:
